@@ -35,10 +35,10 @@
   --red:     #FF5A5A;      /* only for destructive */
   --tab-h:   58px;
   --topbar-h: 44px;
-  /* env(safe-area-inset-bottom) has proven unreliable (reports 0 on some
-     standalone iOS devices that still reserve the home-indicator strip),
-     so every use below enforces a guaranteed floor via max(). */
-  --safe-b:  max(34px, env(safe-area-inset-bottom, 34px));
+  /* The OS reserves its own home-indicator clearance completely independently
+     of anything we do here (confirmed via device testing), so we no longer
+     need to duplicate that buffer ourselves — just a small cosmetic gap. */
+  --safe-b:  6px;
   --r:       16px;
   --r-sm:    10px;
 }
