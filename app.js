@@ -1287,3 +1287,14 @@ if('serviceWorker' in navigator)navigator.serviceWorker.register('sw.js').catch(
 renderToday();
 initTimerOnBoot();
 initLocation();
+
+// TEMPORARY: thin line pinned at the true CSS viewport bottom:0.
+// If this line touches the real bottom edge of the screen with no dark
+// space below it, the fix is confirmed and this can be removed next round.
+// If there's still a gap below this line, that gap is outside the page
+// entirely (OS-level), not something any more CSS can change.
+(function bottomMarker(){
+  const m=document.createElement('div');
+  m.style.cssText='position:fixed;bottom:0;left:0;right:0;height:3px;background:#FF00FF;z-index:99999;pointer-events:none';
+  document.body.appendChild(m);
+})();
