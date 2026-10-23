@@ -1,8 +1,8 @@
-const CACHE = 'set3-v22';
+const CACHE = 'set3-v30';
 // Relative paths (no leading slash) so this works whether the app is
 // deployed at a domain root (Netlify/Cloudflare) or a subpath
 // (GitHub Pages project sites, e.g. username.github.io/reponame/).
-const SHELL = ['.', 'index.html', 'manifest.json', 'app.js'];
+const SHELL = ['.', 'index.html', 'manifest.json', 'icons.js', 'store.js', 'coach.js', 'daily.js', 'app.js'];
 
 self.addEventListener('install', e => {
   e.waitUntil(
