@@ -165,32 +165,49 @@ function exRows(list,key,done){
 
 // ── Exercise picker ────────────────────────────────────
 let _px=null;
+function xchip(e,on,sug,tone){
+  return '<button class="xchip'+(on?' on t-'+tone:'')+'" data-n="'+esc(e.n)+'" aria-pressed="'+on+'" onclick="pxToggle(this)">'
+    +'<span class="x-tick">'+ic('check')+'</span>'+esc(e.n)+(sug?'<span class="x-coach" title="Coach pick">'+ic('sparkles')+'</span>':'')+'</button>';
+}
+function pxPickedHTML(){
+  const st=pickState(_px.ctx),G=GROUP(_px.g),sug={};st.defaults.forEach(function(n){sug[n]=1});
+  const mine=st.list.filter(function(n){return exGroup(n)===_px.g});
+  if(!mine.length)return '<p class="hint">Nothing picked for '+G.short.toLowerCase()+' yet.</p>';
+  return '<div class="px-chips">'+mine.map(function(n){return xchip(exInfo(n)||{n:n},true,!!sug[n],G.tone)}).join('')+'</div>';
+}
 function openExPicker(ctx,g){
   const G=GROUP(g);if(!G)return;
   const st=pickState(ctx);
   if(!st.editable){toast(st.mode==='none'?'Nothing was logged that day':fmtD(st.date)+' is over, so it\'s locked');return}
-  _px={ctx:ctx,g:g};
+  const keepSec=_px&&_px.g===g?_px.sec:'all';
+  _px={ctx:ctx,g:g,sec:keepSec};
   const on={},sug={};st.list.forEach(function(n){on[n]=1});st.defaults.forEach(function(n){sug[n]=1});
-  const all=exercisesInGroup(g).slice().sort(function(a,b){return (sug[b.n]?1:0)-(sug[a.n]?1:0)});
-  const byEq={};all.forEach(function(e){(byEq[e.eq]=byEq[e.eq]||[]).push(e)});
+  const all=exercisesInGroup(g);
+  const bySec={};all.forEach(function(e){(bySec[e.s]=bySec[e.s]||[]).push(e)});
+  // Coach picks first inside each section, then the library order.
+  Object.keys(bySec).forEach(function(k){bySec[k].sort(function(a,b){return (sug[b.n]?1:0)-(sug[a.n]?1:0)})});
+  const secs=exSections(g).filter(function(x){return bySec[x]});
   const title=st.mode==='log'?(_s.plan&&PLAN[_s.plan]?PLAN[_s.plan].title:'This workout'):st.mode==='session'?sessTitle(st.session):st.rec.title;
   const when=st.date===today()?'Today':fmtD(st.date);
   const count=st.list.filter(function(n){return exGroup(n)===g}).length;
-  const secs=EQ_ORDER.filter(function(q){return byEq[q]}).map(function(q){
-    return '<div class="px-sec"><div class="px-lbl">'+(q==='Yours'?'Added by you':q)+'</div><div class="px-chips">'+byEq[q].map(function(e){
-      const isOn=!!on[e.n];
-      return '<button class="xchip'+(isOn?' on t-'+G.tone:'')+'" data-n="'+esc(e.n)+'" aria-pressed="'+isOn+'" onclick="pxToggle(this)">'
-        +'<span class="x-tick">'+ic('check')+'</span>'+esc(e.n)+(sug[e.n]?'<span class="x-coach" title="Coach pick">'+ic('sparkles')+'</span>':'')+'</button>';
-    }).join('')+'</div></div>';
+  const tabs='<div class="chips scroll px-tabs" role="tablist">'+['all'].concat(secs).map(function(x){
+    return '<button class="chip'+(keepSec===x?' on':'')+'" role="tab" data-sec="'+esc(x)+'" onclick="pxSec(this.dataset.sec)">'+(x==='all'?'All':esc(x))+(x==='all'?'':' <i>'+bySec[x].length+'</i>')+'</button>';
+  }).join('')+'</div>';
+  const body=secs.map(function(x){
+    return '<div class="px-sec" data-sec="'+esc(x)+'"><div class="px-lbl">'+esc(x)+'</div><div class="px-chips">'
+      +bySec[x].map(function(e){return xchip(e,!!on[e.n],!!sug[e.n],G.tone)}).join('')+'</div></div>';
   }).join('');
   openModal('ov-ex','<div class="grab"></div>'
     +'<div class="ins-head"><span class="dot big t-'+G.tone+'">'+ic(G.icon)+'</span><div><div class="eyebrow">'+when+' · '+esc(title)+'</div><h3>'+G.label+'</h3></div></div>'
     +'<p class="hint">'+ic('sparkles')+(st.defaults.some(function(n){return exGroup(n)===g})?'Coach picks are marked. Tap anything to switch it on or off.':'Tap the exercises you\'re doing.')+'</p>'
-    +'<input id="px-q" class="inp px-search" type="search" placeholder="Search '+all.length+' exercises" autocomplete="off" oninput="pxFilter(this.value)">'
-    +'<div class="px-body">'+secs+'<p class="px-none hint" hidden>No match. Add it below.</p></div>'
+    +'<div class="px-picked"><div class="px-lbl">Picked</div><div id="px-picked">'+(_px?pxPickedHTML():'')+'</div></div>'
+    +'<input id="px-q" class="inp px-search" type="search" placeholder="Search '+all.length+' exercises" autocomplete="off" oninput="pxFilter()">'
+    +tabs
+    +'<div class="px-body">'+body+'<p class="px-none hint" hidden>No match. Add it below.</p></div>'
     +'<div class="px-add"><input id="px-new" class="inp" placeholder="Add a machine or exercise" autocomplete="off" onkeydown="if(event.key===\'Enter\'){event.preventDefault();pxAdd()}"><button class="btn ghost" onclick="pxAdd()">Add</button></div>'
     +'<div class="px-foot"><span id="px-count">'+count+' picked</span><button class="btn" onclick="pxDone()">Done</button></div>',
     pxDone,'sheet',true);
+  pxFilter();
 }
 function pxToggle(btn){
   if(!_px)return;
@@ -198,16 +215,33 @@ function pxToggle(btn){
   if(i>=0)list.splice(i,1);else list.push(n);
   setPicks(_px.ctx,list);
   const G=GROUP(_px.g),isOn=i<0;
-  btn.classList.toggle('on',isOn);btn.classList.toggle('t-'+G.tone,isOn);btn.setAttribute('aria-pressed',isOn);
+  // The same exercise can show in "Picked" and in its section; update both.
+  document.querySelectorAll('#ov-ex .px-body .xchip').forEach(function(b){
+    if(b.dataset.n!==n)return;
+    b.classList.toggle('on',isOn);b.classList.toggle('t-'+G.tone,isOn);b.setAttribute('aria-pressed',isOn);
+  });
+  const pk=document.getElementById('px-picked');if(pk)pk.innerHTML=pxPickedHTML();
   const c=document.getElementById('px-count');if(c)c.textContent=list.filter(function(x){return exGroup(x)===_px.g}).length+' picked';
 }
-function pxFilter(q){
-  q=(q||'').trim().toLowerCase();let any=false;
-  document.querySelectorAll('#ov-ex .px-sec').forEach(function(sec){
+function pxSec(x){
+  if(!_px)return;_px.sec=x;
+  document.querySelectorAll('#ov-ex .px-tabs .chip').forEach(function(c){c.classList.toggle('on',c.dataset.sec===x)});
+  pxFilter();
+  const m=document.querySelector('#ov-ex .modal'),tabs=document.querySelector('#ov-ex .px-tabs');
+  if(m&&tabs&&m.scrollTop>tabs.offsetTop-12)m.scrollTop=tabs.offsetTop-12;
+}
+function pxFilter(){
+  if(!_px)return;
+  const qEl=document.getElementById('px-q'),q=(qEl&&qEl.value||'').trim().toLowerCase(),words=q.split(/\s+/).filter(Boolean);
+  const sec=q?'all':_px.sec;let any=false;
+  document.querySelectorAll('#ov-ex .px-sec').forEach(function(el){
     let vis=0;
-    sec.querySelectorAll('.xchip').forEach(function(b){const m=!q||b.dataset.n.toLowerCase().indexOf(q)>=0;b.hidden=!m;if(m)vis++});
-    sec.hidden=!vis;if(vis)any=true;
+    if(sec==='all'||el.dataset.sec===sec){
+      el.querySelectorAll('.xchip').forEach(function(b){const nm=b.dataset.n.toLowerCase();const m=words.every(function(w){return nm.indexOf(w)>=0});b.hidden=!m;if(m)vis++});
+    }
+    el.hidden=!vis;if(vis)any=true;
   });
+  const tabs=document.querySelector('#ov-ex .px-tabs');if(tabs)tabs.classList.toggle('dim',!!q);
   const none=document.querySelector('#ov-ex .px-none');if(none)none.hidden=any;
 }
 function pxAdd(){
