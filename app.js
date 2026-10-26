@@ -12,13 +12,17 @@ const DOW_F=['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturd
 // ── Small UI kit ───────────────────────────────────────
 let _tt;
 function toast(msg){const el=document.getElementById('toast');el.textContent=msg;el.classList.add('show');clearTimeout(_tt);_tt=setTimeout(function(){el.classList.remove('show')},2200)}
-let _ovClose=null;
+function topOverlay(){const o=document.querySelectorAll('.ov:not(.closing)');return o[o.length-1]||null}
+function closeOne(id){
+  const o=document.getElementById(id);if(!o)return;
+  if(matchMedia('(prefers-reduced-motion: reduce)').matches){o.remove();return}
+  o.classList.add('closing');setTimeout(function(){o.remove()},210);
+}
 function closeOverlays(immediate){
   document.querySelectorAll('.ov').forEach(function(o){
     if(immediate||o.classList.contains('closing')||matchMedia('(prefers-reduced-motion: reduce)').matches){o.remove();return}
     o.classList.add('closing');setTimeout(function(){o.remove()},210);
   });
-  _ovClose=null;
 }
 // Drag a sheet down from its top to dismiss it (phones).
 function enableDrag(ov){
@@ -38,29 +42,30 @@ function enableDrag(ov){
     m.classList.add('settle');m.style.transform='';setTimeout(function(){m.classList.remove('settle')},300);
   });
 }
-function openModal(id,inner,onBackdrop,kind){
+function openModal(id,inner,onBackdrop,kind,stack){
   // Re-rendering an open sheet swaps its content in place (no re-animation, scroll kept).
   const open=document.getElementById(id||'ov');
   if(open&&open.classList.contains('ov')&&!open.classList.contains('closing')&&open.classList.contains('is-sheet')===(kind==='sheet')){
     const m=open.querySelector('.modal'),st=m.scrollTop;
     m.innerHTML=inner;m.scrollTop=st;
-    _ovClose=onBackdrop||closeOverlays;
     open._bd=onBackdrop||closeOverlays;
     return;
   }
-  closeOverlays(true);
+  if(!stack)closeOverlays(true);
   const ov=document.createElement('div');
-  ov.className='ov'+(kind==='sheet'?' is-sheet':'');ov.id=id||'ov';
+  ov.className='ov'+(kind==='sheet'?' is-sheet':'')+(stack?' stacked':'');ov.id=id||'ov';
   ov.innerHTML='<div class="modal" role="dialog" aria-modal="true">'+inner+'</div>';
   ov._bd=onBackdrop||closeOverlays;
   ov.addEventListener('click',function(e){if(e.target===ov)ov._bd()});
-  _ovClose=onBackdrop||closeOverlays;
   document.body.appendChild(ov);
   enableDrag(ov);
   const f=ov.querySelector('[autofocus]');if(f)setTimeout(function(){f.focus()},60);
 }
-function openSheet(inner){openModal('ov-sheet','<div class="grab"></div>'+inner,null,'sheet')}
-document.addEventListener('keydown',function(e){if(e.key==='Escape'&&_ovClose)_ovClose()});
+function openSheet(inner){
+  openModal('ov-sheet','<div class="grab"></div>'+inner,null,'sheet');
+  const el=document.getElementById('ov-sheet');if(el)delete el.dataset.planDay;
+}
+document.addEventListener('keydown',function(e){if(e.key==='Escape'){const t=topOverlay();if(t)t._bd()}});
 function askConfirm(title,body,yes,onYes,danger){
   openSheet('<h3>'+title+'</h3><p class="hint">'+body+'</p>'
     +'<div class="row-btns"><button class="btn ghost" onclick="closeOverlays()">Cancel</button>'
@@ -74,6 +79,162 @@ function listRow(icon,tone,title,sub,onclick,badge){
     +'<span class="chev">'+ic('right')+'</span></button>';
 }
 function groupChip(k){const G=GROUP(k);return G?'<span class="gchip t-'+G.tone+'">'+ic(G.icon)+G.short+'</span>':''}
+// A chip you can hold (or right-click) to pick that group's exercises.
+// ctx is a date, or 'log' for the workout open in the logger. tap = what a plain tap does.
+function holdChip(k,ctx,tap){
+  const G=GROUP(k);if(!G)return '';
+  return '<button class="gchip hold t-'+G.tone+'" data-hold-g="'+k+'" data-hold-ctx="'+ctx+'" onclick="'+(tap||('openExPicker(\''+ctx+'\',\''+k+'\')'))+'" aria-label="'+G.label+'. Hold to pick exercises">'+ic(G.icon)+G.short+'</button>';
+}
+
+// ── Press and hold ─────────────────────────────────────
+const HOLD_MS=450;
+let _hold=null,_holdFired=false;
+document.addEventListener('pointerdown',function(e){
+  _holdFired=false;
+  const el=e.target.closest('[data-hold-g]');if(!el||e.button>0)return;
+  el.classList.add('holding');
+  _hold={el:el,x:e.clientX,y:e.clientY,t:setTimeout(function(){
+    _holdFired=true;el.classList.remove('holding');_hold=null;
+    try{if(navigator.vibrate)navigator.vibrate(12)}catch(err){}
+    openExPicker(el.dataset.holdCtx,el.dataset.holdG);
+  },HOLD_MS)};
+});
+function holdCancel(){if(_hold){clearTimeout(_hold.t);_hold.el.classList.remove('holding');_hold=null}}
+document.addEventListener('pointermove',function(e){if(_hold&&Math.hypot(e.clientX-_hold.x,e.clientY-_hold.y)>10)holdCancel()},{passive:true});
+document.addEventListener('pointerup',holdCancel);
+document.addEventListener('pointercancel',holdCancel);
+// The click that ends a hold must not also tap whatever is underneath.
+document.addEventListener('click',function(e){if(_holdFired){_holdFired=false;e.preventDefault();e.stopPropagation()}},true);
+document.addEventListener('contextmenu',function(e){
+  const el=e.target.closest('[data-hold-g]');if(!el)return;
+  e.preventDefault();
+  if(!_holdFired&&e.pointerType!=='touch'){holdCancel();openExPicker(el.dataset.holdCtx,el.dataset.holdG)}
+});
+
+// ── Exercises for a day ────────────────────────────────
+// Where a day's exercise list lives:
+//  'log'     the workout open in the logger (_s)
+//  'session' a logged workout
+//  'plan'    a day not logged yet: the coach's picks, or your swaps (stored in 'picks')
+function pickState(ctx){
+  if(ctx==='log'){
+    const defs=_s.plan?planDefaults(_s.plan):[];
+    return {mode:'log',date:_s.date,key:_s.plan||null,list:Array.isArray(_s.exercises)?_s.exercises.slice():defs.filter(function(n){return _s.groups.indexOf(exGroup(n))>=0}),defaults:defs,editable:!isLocked(_s.date),confirmed:Array.isArray(_s.exercises)};
+  }
+  const date=ctx;
+  const s=getSess().filter(function(x){return x.date===date&&(x.groups||[]).length})[0];
+  if(s){
+    const defs=s.plan?planDefaults(s.plan):[];
+    return {mode:'session',date:date,session:s,key:s.plan||null,list:Array.isArray(s.exercises)?s.exercises.slice():defs.slice(),defaults:defs,editable:!isLocked(date),confirmed:Array.isArray(s.exercises)};
+  }
+  if(date<today())return {mode:'none',date:date,list:[],defaults:[],editable:false};
+  const rec=projectDays(today(),daysBetween(today(),date)+1)[date];
+  const pk=sGet('picks',{})[date];
+  const defs=planDefaults(rec.key);
+  const mine=!!(pk&&pk.key===rec.key);
+  return {mode:'plan',date:date,key:rec.key,rec:rec,list:mine?pk.exercises.slice():defs.slice(),defaults:defs,editable:true,confirmed:mine};
+}
+function addGroupsFor(list,groups){
+  list.forEach(function(n){const g=exGroup(n);if(g&&groups.indexOf(g)<0)groups.push(g)});
+  return groups;
+}
+function setPicks(ctx,list){
+  const st=pickState(ctx);
+  if(st.mode==='log'){_s.exercises=list;addGroupsFor(list,_s.groups);return}
+  if(st.mode==='session'){
+    const all=getSess().slice();
+    all.forEach(function(x){if(x.id===st.session.id){x.exercises=list;addGroupsFor(list,x.groups)}});
+    putSess(all);return;
+  }
+  if(st.mode==='plan'){
+    const picks=Object.assign({},sGet('picks',{})),td=today();
+    Object.keys(picks).forEach(function(d){if(d<td)delete picks[d]});
+    picks[st.date]={key:st.key,exercises:list};
+    sSet('picks',picks);
+  }
+}
+// done=true lists what was done (equipment), otherwise what to do (sets × reps).
+function exRows(list,key,done){
+  if(!list.length)return '<p class="hint">No exercises picked yet. Hold a muscle group to choose.</p>';
+  return '<div class="moves">'+list.map(function(n){
+    const g=GROUP(exGroup(n)),e=exInfo(n);
+    return '<div class="mv"><b><i class="mv-dot '+(g?'t-'+g.tone:'')+'"></i>'+esc(n)+'</b>'
+      +(done?'<small>'+esc(e&&e.eq&&e.eq!=='Yours'?e.eq:'')+'</small>':'<span>'+esc(doseFor(n,key))+'</span>')+'</div>';
+  }).join('')+'</div>';
+}
+
+// ── Exercise picker ────────────────────────────────────
+let _px=null;
+function openExPicker(ctx,g){
+  const G=GROUP(g);if(!G)return;
+  const st=pickState(ctx);
+  if(!st.editable){toast(st.mode==='none'?'Nothing was logged that day':fmtD(st.date)+' is over, so it\'s locked');return}
+  _px={ctx:ctx,g:g};
+  const on={},sug={};st.list.forEach(function(n){on[n]=1});st.defaults.forEach(function(n){sug[n]=1});
+  const all=exercisesInGroup(g).slice().sort(function(a,b){return (sug[b.n]?1:0)-(sug[a.n]?1:0)});
+  const byEq={};all.forEach(function(e){(byEq[e.eq]=byEq[e.eq]||[]).push(e)});
+  const title=st.mode==='log'?(_s.plan&&PLAN[_s.plan]?PLAN[_s.plan].title:'This workout'):st.mode==='session'?sessTitle(st.session):st.rec.title;
+  const when=st.date===today()?'Today':fmtD(st.date);
+  const count=st.list.filter(function(n){return exGroup(n)===g}).length;
+  const secs=EQ_ORDER.filter(function(q){return byEq[q]}).map(function(q){
+    return '<div class="px-sec"><div class="px-lbl">'+(q==='Yours'?'Added by you':q)+'</div><div class="px-chips">'+byEq[q].map(function(e){
+      const isOn=!!on[e.n];
+      return '<button class="xchip'+(isOn?' on t-'+G.tone:'')+'" data-n="'+esc(e.n)+'" aria-pressed="'+isOn+'" onclick="pxToggle(this)">'
+        +'<span class="x-tick">'+ic('check')+'</span>'+esc(e.n)+(sug[e.n]?'<span class="x-coach" title="Coach pick">'+ic('sparkles')+'</span>':'')+'</button>';
+    }).join('')+'</div></div>';
+  }).join('');
+  openModal('ov-ex','<div class="grab"></div>'
+    +'<div class="ins-head"><span class="dot big t-'+G.tone+'">'+ic(G.icon)+'</span><div><div class="eyebrow">'+when+' · '+esc(title)+'</div><h3>'+G.label+'</h3></div></div>'
+    +'<p class="hint">'+ic('sparkles')+(st.defaults.some(function(n){return exGroup(n)===g})?'Coach picks are marked. Tap anything to switch it on or off.':'Tap the exercises you\'re doing.')+'</p>'
+    +'<input id="px-q" class="inp px-search" type="search" placeholder="Search '+all.length+' exercises" autocomplete="off" oninput="pxFilter(this.value)">'
+    +'<div class="px-body">'+secs+'<p class="px-none hint" hidden>No match. Add it below.</p></div>'
+    +'<div class="px-add"><input id="px-new" class="inp" placeholder="Add a machine or exercise" autocomplete="off" onkeydown="if(event.key===\'Enter\'){event.preventDefault();pxAdd()}"><button class="btn ghost" onclick="pxAdd()">Add</button></div>'
+    +'<div class="px-foot"><span id="px-count">'+count+' picked</span><button class="btn" onclick="pxDone()">Done</button></div>',
+    pxDone,'sheet',true);
+}
+function pxToggle(btn){
+  if(!_px)return;
+  const n=btn.dataset.n,st=pickState(_px.ctx),list=st.list.slice(),i=list.indexOf(n);
+  if(i>=0)list.splice(i,1);else list.push(n);
+  setPicks(_px.ctx,list);
+  const G=GROUP(_px.g),isOn=i<0;
+  btn.classList.toggle('on',isOn);btn.classList.toggle('t-'+G.tone,isOn);btn.setAttribute('aria-pressed',isOn);
+  const c=document.getElementById('px-count');if(c)c.textContent=list.filter(function(x){return exGroup(x)===_px.g}).length+' picked';
+}
+function pxFilter(q){
+  q=(q||'').trim().toLowerCase();let any=false;
+  document.querySelectorAll('#ov-ex .px-sec').forEach(function(sec){
+    let vis=0;
+    sec.querySelectorAll('.xchip').forEach(function(b){const m=!q||b.dataset.n.toLowerCase().indexOf(q)>=0;b.hidden=!m;if(m)vis++});
+    sec.hidden=!vis;if(vis)any=true;
+  });
+  const none=document.querySelector('#ov-ex .px-none');if(none)none.hidden=any;
+}
+function pxAdd(){
+  if(!_px)return;
+  const inp=document.getElementById('px-new'),name=(inp.value||'').trim().replace(/\s+/g,' ');
+  if(!name){toast('Type the exercise or machine name');return}
+  const known=EXDB.concat(customEx()).filter(function(e){return e.n.toLowerCase()===name.toLowerCase()})[0];
+  let n=name;
+  if(known){
+    n=known.n;
+    const kg=exGroup(n);
+    if(kg!==_px.g){toast(n+' is under '+GROUP(kg).label+'. Hold that group to pick it');return}
+  } else {
+    const p=getProfile();p.customEx=(p.customEx||[]).concat([{n:name,group:_px.g,t:'weight'}]);putProfile(p);
+  }
+  const st=pickState(_px.ctx),list=st.list.slice();if(list.indexOf(n)<0)list.push(n);
+  setPicks(_px.ctx,list);
+  openExPicker(_px.ctx,_px.g);
+  toast('Added '+n);
+}
+function pxDone(){
+  const px=_px;_px=null;closeOne('ov-ex');
+  if(!px)return;
+  if(px.ctx==='log'){if(document.getElementById('ov-log'))buildLog()}
+  else{const sh=document.getElementById('ov-sheet');if(sh&&sh.dataset.planDay===px.ctx)openPlanDay(px.ctx)}
+  RENDER[cur]();
+}
 
 // ── Router ─────────────────────────────────────────────
 let cur='today';
@@ -224,7 +385,8 @@ function coachCard(compact){
     const dayName=new Date(tm+'T00:00:00').toLocaleDateString('en-IN',{weekday:'long'});
     return '<section class="card tone-pink coach'+(compact?'':' big')+'"><div class="eyebrow">Coach · done for today</div>'
       +'<h3>'+esc(sessTitle(done))+'</h3>'
-      +(compact?'':'<div class="chips wrap">'+(done.groups||[]).map(groupChip).join('')+'</div>')
+      +'<div class="chips wrap">'+(done.groups||[]).map(function(k){return holdChip(k,td,'openPlanDay(\''+td+'\')')}).join('')+'</div>'
+      +(compact?'':'<p class="hold-hint">Hold a muscle group to change today\'s exercises</p>')
       +'<div class="next-up"><span class="dot t-'+next.plan.tone+'">'+ic(next.plan.icon)+'</span><div><small>Next up · '+dayName+'</small><b>'+esc(next.title)+'</b><p>'+esc(next.reasons[0])+'</p></div></div>'
       +'<div class="row-btns"><button class="btn" onclick="openPlanDay(\''+tm+'\')">'+dayName+'\'s plan</button>'
       +(compact?'':'<button class="btn ghost" onclick="openLog(today())">Edit today</button>')+'</div>'
@@ -235,7 +397,8 @@ function coachCard(compact){
   const reasons=compact?rec.reasons.slice(0,1):rec.reasons;
   return '<section class="card tone-pink coach'+(compact?'':' big')+'"><div class="eyebrow">Coach · today</div>'
     +'<h3>'+esc(rec.title)+' <span class="h-sub">'+esc(rec.sub)+'</span></h3>'
-    +(compact?'':'<div class="chips wrap">'+rec.groups.map(groupChip).join('')+'</div><div class="why-lbl">Why today</div>')
+    +'<div class="chips wrap">'+todayGroups(rec).map(function(k){return holdChip(k,td,'openPlanDay(\''+td+'\')')}).join('')+'</div>'
+    +(compact?'':'<p class="hold-hint">Hold a muscle group to see or swap its exercises</p><div class="why-lbl">Why today</div>')
     +'<ul class="why'+(compact?' compact':'')+'">'+reasons.map(function(r){return '<li>'+esc(r)+'</li>'}).join('')+'</ul>'
     +'<div class="row-btns">'+(rec.key==='rest'?'':'<button class="btn" onclick="logFromRec()">Log this</button>')
     +'<button class="btn ghost" onclick="openPlanDay(today())">See the session</button></div>'
@@ -243,6 +406,7 @@ function coachCard(compact){
     +'</section>';
 }
 
+function todayGroups(rec){return addGroupsFor(pickState(today()).list,rec.groups.slice())}
 // Simulate the coming days assuming you follow each suggestion.
 function projectDays(from,n){
   const sim=getSess().slice(),out={};
@@ -289,34 +453,33 @@ function openLiftRules(){
     +'<div class="row-btns"><button class="btn" onclick="closeOverlays()">Got it</button></div>');
 }
 function openPlanDay(date){
-  const td=today();
-  const logged=getSess().filter(function(s){return s.date===date&&(s.groups||[]).length})[0];
+  const td=today(),st=pickState(date);
   const head=function(eyebrow,title,sub,tone,icon){return '<div class="ins-head"><span class="dot big t-'+tone+'">'+ic(icon)+'</span><div><div class="eyebrow">'+eyebrow+'</div><h3>'+esc(title)+(sub?' <span class="h-sub">'+esc(sub)+'</span>':'')+'</h3></div></div>'};
-  const movesTable=function(P){
-    return '<div class="moves">'+P.moves.map(function(m){return '<div class="mv"><b>'+esc(m[0])+'</b><span>'+esc(m[1])+'</span></div>'}).join('')+'</div>'
-      +(P.finish?'<p class="hint">'+ic('cardio')+esc(P.finish)+'</p>':'');
-  };
-  if(logged){
-    const P=logged.plan&&PLAN[logged.plan];
-    openSheet(head(fmtDLong(date)+' · done',sessTitle(logged),P?P.sub:'',P?P.tone:'green','check')
-      +'<div class="chips wrap">'+(logged.groups||[]).map(groupChip).join('')+'</div>'
-      +(logged.notes?'<p class="note-block" style="margin-top:12px">'+esc(logged.notes)+'</p>':'')
-      +(P?'<label class="lbl">The plan for this session</label>'+movesTable(P):'')
-      +'<div class="row-btns"><button class="btn ghost" onclick="closeOverlays()">Close</button>'+(isLocked(date)?'':'<button class="btn" onclick="closeOverlays();openLog(\''+date+'\')">Edit</button>')+'</div>');
-    return;
+  const chips=function(groups){return '<div class="chips wrap">'+groups.map(function(k){return st.editable?holdChip(k,date):groupChip(k)}).join('')+'</div>'+(st.editable?'<p class="hold-hint">Tap or hold a muscle group to pick its exercises</p>':'')};
+  if(st.mode==='session'){
+    const s=st.session,P=s.plan&&PLAN[s.plan];
+    const label=st.confirmed?'What you did':(P?'Coach\'s plan · not confirmed':'Exercises');
+    openSheet(head(fmtDLong(date)+' · done',sessTitle(s),P?P.sub:'',P?P.tone:'green','check')
+      +chips(s.groups||[])
+      +(s.notes?'<p class="note-block" style="margin-top:12px">'+esc(s.notes)+'</p>':'')
+      +'<label class="lbl">'+label+'</label>'+(st.list.length||P?exRows(st.list,s.plan,st.confirmed):'<p class="hint">No exercises saved for this day.</p>')
+      +(!st.confirmed&&P&&st.editable?'<p class="hint">'+ic('info')+'Hold a muscle group to swap in what you actually did.</p>':'')
+      +'<div class="row-btns"><button class="btn ghost" onclick="closeOverlays()">Close</button>'+(st.editable?'<button class="btn" onclick="closeOverlays();openLog(\''+date+'\')">Edit</button>':'')+'</div>');
+  } else if(st.mode==='none'){
+    openSheet(head(fmtDLong(date),'Nothing logged','','blue','bed')+'<p class="hint">That\'s fine. The plan doesn\'t make you catch up; it continues from your next session.</p><div class="row-btns"><button class="btn" onclick="closeOverlays()">Close</button></div>');
+  } else {
+    const rec=st.rec,P=rec.plan;
+    const groups=addGroupsFor(st.list,rec.groups.slice());
+    openSheet(head((date===td?'Today':new Date(date+'T00:00:00').toLocaleDateString('en-IN',{weekday:'long',day:'numeric',month:'short'}))+(date===td?'':' · planned'),rec.title,rec.sub,P.tone,P.icon)
+      +chips(groups)
+      +'<div class="why-lbl">Why '+(date===td?'today':'this day')+'</div><ul class="why">'+rec.reasons.slice(0,3).map(function(r){return '<li>'+esc(r)+'</li>'}).join('')+'</ul>'
+      +(date===td?'':'<p class="hint">'+ic('info')+'Assumes you follow the plan until then. It updates as you log.</p>')
+      +'<label class="lbl">The session <span class="lbl-tag">'+(st.confirmed?'Your picks':'Coach picks')+'</span></label>'+exRows(st.list,rec.key)
+      +(P.finish?'<p class="hint">'+ic('cardio')+esc(P.finish)+'</p>':'')
+      +(['lower','upper','full'].indexOf(P.kind)>=0?'<button class="link" onclick="openLiftRules()">'+ic('list')+'How to lift: reps in the tank, rest, moving up</button>':'')
+      +'<div class="row-btns"><button class="btn ghost" onclick="closeOverlays()">Close</button>'+(date===td&&rec.key!=='rest'?'<button class="btn" onclick="closeOverlays();logFromRec()">Log this</button>':'')+'</div>');
   }
-  if(date<td){
-    openSheet(head(fmtDLong(date),'Nothing logged','', 'blue','bed')+'<p class="hint">That\'s fine. The plan doesn\'t make you catch up; it continues from your next session.</p><div class="row-btns"><button class="btn" onclick="closeOverlays()">Close</button></div>');
-    return;
-  }
-  const rec=projectDays(td,daysBetween(td,date)+1)[date];
-  const P=rec.plan;
-  openSheet(head((date===td?'Today':new Date(date+'T00:00:00').toLocaleDateString('en-IN',{weekday:'long',day:'numeric',month:'short'}))+(date===td?'':' · planned'),rec.title,rec.sub,P.tone,P.icon)
-    +'<div class="why-lbl">Why '+(date===td?'today':'this day')+'</div><ul class="why">'+rec.reasons.slice(0,3).map(function(r){return '<li>'+esc(r)+'</li>'}).join('')+'</ul>'
-    +(date===td?'':'<p class="hint">'+ic('info')+'Assumes you follow the plan until then. It updates as you log.</p>')
-    +'<label class="lbl">The session</label>'+movesTable(P)
-    +(['lower','upper','full'].indexOf(P.kind)>=0?'<button class="link" onclick="openLiftRules()">'+ic('list')+'How to lift: reps in the tank, rest, moving up</button>':'')
-    +'<div class="row-btns"><button class="btn ghost" onclick="closeOverlays()">Close</button>'+(date===td&&rec.key!=='rest'?'<button class="btn" onclick="closeOverlays();logFromRec()">Log this</button>':'')+'</div>');
+  const el=document.getElementById('ov-sheet');if(el)el.dataset.planDay=date;
 }
 function tile(tone,label,val,target,sub){
   return '<div class="tile t-'+tone+'"><span>'+label+'</span><b>'+val+(target!=null?'<small>/'+target+'</small>':'')+'</b><small>'+sub+'</small></div>';
@@ -423,6 +586,7 @@ function renderHistory(){
 function sessRow(s){
   const G=GROUP((s.groups||[])[0])||{tone:'yellow',icon:'gym'};
   const extra=[];
+  if(Array.isArray(s.exercises)&&s.exercises.length)extra.push(s.exercises.length+' exercise'+(s.exercises.length>1?'s':''));
   if(s.durationMin)extra.push(s.durationMin+' min');
   if(s.legacy&&s.legacy.length)extra.push(s.legacy.length+' exercises in old log');
   return '<button class="row sess" onclick="openSess(\''+s.id+'\')"><span class="dot t-'+G.tone+'">'+ic(G.icon)+'</span>'
@@ -439,7 +603,7 @@ function sessRow(s){
 let _s=null,_sEditing=false;
 // A day locks once it's over (4am the next morning, same as check-ins).
 function isLocked(date){return date<ckDay()}
-function openLog(date,preset,planKey){
+function openLog(date,preset,planKey,exercises){
   const ex=getSess().filter(function(s){return s.date===date})[0];
   if(isLocked(date)){
     if(ex){openSess(ex.id);return}
@@ -449,6 +613,7 @@ function openLog(date,preset,planKey){
   _s=ex?JSON.parse(JSON.stringify(ex)):{id:uid(),date:date,groups:[],notes:''};
   if(preset)_s.groups=preset.slice();
   if(planKey)_s.plan=planKey;
+  if(exercises)_s.exercises=exercises.slice();
   _sEditing=!!ex;
   buildLog();
 }
@@ -456,13 +621,18 @@ function openSess(id){
   const f=getSess().filter(function(s){return s.id===id})[0];if(!f)return;
   _s=JSON.parse(JSON.stringify(f));_sEditing=true;buildLog();
 }
-function logFromRec(){const r=recommend(today());openLog(today(),r.groups,r.key)}
+function logFromRec(){
+  const r=recommend(today()),st=pickState(today());
+  if(st.mode==='session'){openSess(st.session.id);return}
+  openLog(today(),addGroupsFor(st.list,r.groups.slice()),r.key,st.list);
+}
 function buildLockedLog(){
   const s=_s;
   openModal('ov-log','<header class="modal-head"><div><div class="eyebrow">'+fmtDLong(s.date)+'</div><h2>'+esc(sessTitle(s))+'</h2></div>'
     +'<button class="circle" onclick="closeOverlays()" aria-label="Close">'+ic('x')+'</button></header>'
     +'<div class="chips wrap">'+(s.groups||[]).map(groupChip).join('')+'</div>'
     +(s.durationMin?'<p class="hint">'+ic('timer')+' '+s.durationMin+' min'+(s.durationCapped?' (timer capped at 2 hours)':'')+'</p>':'')
+    +(Array.isArray(s.exercises)&&s.exercises.length?'<label class="lbl">What you did</label>'+exRows(s.exercises,s.plan,true):'')
     +(s.notes?'<label class="lbl">Notes</label><p class="note-block">'+esc(s.notes)+'</p>':'')
     +(s.legacy&&s.legacy.length?'<p class="hint">From the old log: '+esc(s.legacy.join(', '))+'</p>':'')
     +'<p class="locked-line">'+ic('lock')+'This day is over, so the workout is locked.</p>'
@@ -476,14 +646,15 @@ function buildLog(){
   const quick=['lowerA','upperA','lowerB','upperB','full','cardio','long'].map(function(k){return '<button class="chip'+(_s.plan===k?' on':'')+'" data-plan="'+k+'" onclick="logPreset(\''+k+'\')">'+PLAN[k].title+'</button>'}).join('');
   const tiles=GROUPS.map(function(G){
     const on=_s.groups.indexOf(G.k)>=0,s=sug.indexOf(G.k)>=0;
-    return '<button class="gtile'+(on?' on t-'+G.tone:'')+'" data-k="'+G.k+'" data-sug="'+(s?1:0)+'" aria-pressed="'+on+'" onclick="logToggle(\''+G.k+'\')">'
+    return '<button class="gtile'+(on?' on t-'+G.tone:'')+'" data-k="'+G.k+'" data-sug="'+(s?1:0)+'" data-hold-g="'+G.k+'" data-hold-ctx="log" aria-pressed="'+on+'" onclick="logToggle(\''+G.k+'\')">'
       +'<span class="dot t-'+G.tone+'">'+ic(G.icon)+'</span><b>'+G.label+'</b>'
       +(s&&!on?'<em>Suggested</em>':'')+(on?'<span class="tick">'+ic('check')+'</span>':'')+'</button>';
   }).join('');
   openModal('ov-log','<header class="modal-head"><div><div class="eyebrow">'+(isToday?'Today · ':'')+fmtD(_s.date)+'</div><h2>'+(_s.plan&&PLAN[_s.plan]?esc(PLAN[_s.plan].title):(_sEditing?'Edit workout':'What did you train?'))+'</h2></div>'
     +'<button class="circle" onclick="saveLog()" aria-label="Save">'+ic('check')+'</button></header>'
     +'<label class="lbl">Quick picks</label><div class="chips scroll">'+quick+'</div>'
-    +'<label class="lbl">Muscle groups</label><div class="gtiles">'+tiles+'</div>'
+    +'<label class="lbl">Muscle groups <span class="lbl-tag">hold one to pick exercises</span></label><div class="gtiles">'+tiles+'</div>'
+    +'<label class="lbl">Exercises</label><div id="log-ex">'+logExSummary()+'</div>'
     +(_s.durationMin?'<p class="hint">'+ic('timer')+' Timer: '+_s.durationMin+' min'+(_s.durationCapped?' (capped at 2 hours)':'')+'</p>':'')
     +'<p class="hint">'+ic('lock')+'You can edit this until the day ends. After that it\'s locked.</p>'
     +(_s.legacy&&_s.legacy.length?'<p class="hint">From the old log: '+esc(_s.legacy.join(', '))+'</p>':'')
@@ -491,9 +662,22 @@ function buildLog(){
     +'<div class="row-btns">'+(_sEditing?'<button class="btn ghost danger-text" onclick="deleteLog()">'+ic('trash')+'Delete</button>':'')+'<button class="btn" onclick="saveLog()">Save workout</button></div>');
 }
 function logKeepNotes(){const n=document.getElementById('log-notes');if(n)_s.notes=n.value}
+function logExSummary(){
+  const st=pickState('log');
+  if(!st.list.length)return '<p class="hint">None picked. Hold a muscle group above to choose its exercises.</p>';
+  return '<div class="ex-list">'+st.list.map(function(n){
+    const g=exGroup(n),G=GROUP(g);
+    return '<button class="xchip on mini'+(G?' t-'+G.tone:'')+'" onclick="openExPicker(\'log\',\''+g+'\')">'+esc(n)+'</button>';
+  }).join('')+'</div>'+(st.confirmed?'':'<p class="hint">'+ic('sparkles')+'Coach picks for '+esc(PLAN[_s.plan].title)+'. Hold a group to swap any.</p>');
+}
 function logToggle(k){
   logKeepNotes();const i=_s.groups.indexOf(k);if(i>=0)_s.groups.splice(i,1);else _s.groups.push(k);
-  if(_s.plan&&PLAN[_s.plan]&&sessionKind({groups:_s.groups})!==PLAN[_s.plan].kind)delete _s.plan;
+  if(i>=0&&Array.isArray(_s.exercises))_s.exercises=_s.exercises.filter(function(n){return exGroup(n)!==k});
+  if(_s.plan&&PLAN[_s.plan]&&sessionKind({groups:_s.groups})!==PLAN[_s.plan].kind){
+    if(!Array.isArray(_s.exercises))_s.exercises=pickState('log').list;
+    delete _s.plan;
+  }
+  const exBox=document.getElementById('log-ex');if(exBox)exBox.innerHTML=logExSummary();
   // Update in place so the tile transitions instead of the sheet redrawing.
   const G=GROUP(k),btn=document.querySelector('#ov-log .gtile[data-k="'+k+'"]');
   if(!btn){buildLog();return}
@@ -506,12 +690,13 @@ function logToggle(k){
   const h=document.querySelector('#ov-log .modal-head h2');
   if(h)h.textContent=_s.plan&&PLAN[_s.plan]?PLAN[_s.plan].title:(_sEditing?'Edit workout':'What did you train?');
 }
-function logPreset(key){logKeepNotes();_s.groups=PLAN[key].groups.slice();_s.plan=key;buildLog()}
+function logPreset(key){logKeepNotes();_s.groups=PLAN[key].groups.slice();_s.plan=key;_s.exercises=planDefaults(key);buildLog()}
 function saveLog(){
   if(isLocked(_s.date)){closeOverlays();toast('That day is locked');return}
   logKeepNotes();
   _s.notes=(_s.notes||'').trim();
   if(!_s.groups.length){toast('Pick at least one group');return}
+  if(!Array.isArray(_s.exercises))_s.exercises=pickState('log').list;
   const all=getSess().slice();
   let i=-1;for(let j=0;j<all.length;j++){if(all[j].id===_s.id){i=j;break}}
   if(i>=0)all[i]=_s;else all.push(_s);
@@ -723,8 +908,8 @@ function reportTraining(){
   md+='## Baseline (InBody, June 2026)\n\n- Weight '+B.weight+' kg, target about '+B.target+' kg\n- Body fat '+B.bodyFat+'%, visceral fat level '+B.visceral+'\n- BMR '+B.bmr+' kcal, InBody score '+B.score+'/100, leg muscle '+B.legMuscle.toLowerCase()+'\n\n';
   md+='## Last 7 days\n\n- Strength days: '+st.strengthDays7+' of '+STRENGTH_DAYS_TARGET+'\n- Days with cardio: '+st.cardio7+' of '+CARDIO_TARGET+'\n';
   GROUPS.forEach(function(G){if(G.target)md+='- '+G.label+': '+st.groups[G.k].n7+' of '+G.target+'\n'});
-  md+='\n## Sessions\n\n| Date | Session | Trained | Minutes | Notes |\n|---|---|---|---|---|\n';
-  sess.forEach(function(s){md+='| '+fmtD(s.date)+' '+s.date.slice(0,4)+' | '+sessTitle(s)+' | '+(s.groups||[]).map(function(k){return GROUP(k)?GROUP(k).label:k}).join(', ')+' | '+(s.durationMin||'')+' | '+(s.notes||'').replace(/\|/g,'/').replace(/\n/g,' ')+' |\n'});
+  md+='\n## Sessions\n\n| Date | Session | Trained | Exercises | Minutes | Notes |\n|---|---|---|---|---|---|\n';
+  sess.forEach(function(s){md+='| '+fmtD(s.date)+' '+s.date.slice(0,4)+' | '+sessTitle(s)+' | '+(s.groups||[]).map(function(k){return GROUP(k)?GROUP(k).label:k}).join(', ')+' | '+(Array.isArray(s.exercises)?s.exercises.join(', '):'')+' | '+(s.durationMin||'')+' | '+(s.notes||'').replace(/\|/g,'/').replace(/\n/g,' ')+' |\n'});
   if(mets.length){md+='\n## Body measurements\n\n| Date | Weight (kg) | Waist (cm) |\n|---|---|---|\n';mets.forEach(function(m){md+='| '+m.date+' | '+(m.weight||'')+' | '+(m.waist||'')+' |\n'})}
   md+='\n---\nSuggested prompt: "Here is my SET3 training log. Analyse my progress: what\'s improving, what needs attention, and what I should focus on for the next 4 weeks."\n';
   deliver('set3-training-log-'+today()+'.md',md,'text/markdown');

@@ -5,7 +5,7 @@
 // artifact, to the private per-user db so it survives browsers and
 // devices. On the standalone PWA only localStorage is used.
 // ══════════════════════════════════════════════════════
-const KEYS=['sessions','mets','restDays','daily','reset','timer','profile'];
+const KEYS=['sessions','mets','restDays','daily','reset','timer','profile','picks'];
 const LS='set3:';
 const S={cache:{},at:{},db:null,uid:null,mode:'local',writing:{},dirty:{},err:null};
 
@@ -122,8 +122,11 @@ const EXMAP={"Barbell Bench Press":"chest","Incline Barbell Press":"chest","Decl
 const TYPE_TO_GROUPS={upper:['chest','back','shoulders','arms'],lower:['legs'],cardio:['cardio'],core:['cardio','core'],rest:['mobility'],other:[]};
 const TIMER_MAX_MIN=120;
 // Sessions shared from exported logs, added if that day is missing.
+// 26 Oct exercises are read from the notes Aadi wrote that day.
+const SEED_EX_1026=['Hip Thrust (Machine)','Seated Leg Curl','Leg Press','Lat Pulldown','Chest Press Machine','Rear Delt Fly (Dumbbell)','Dead Bug','Plank','Treadmill Incline Walk'];
 const SEED_SESSIONS=[
-  {id:'log-2026-10-26',date:'2026-10-26',plan:'full',groups:['back','chest','core','cardio','legs'],durationMin:120,durationCapped:true,
+  {id:'log-2026-10-26',date:'2026-10-26',plan:'full',groups:['back','chest','core','cardio','legs','shoulders'],durationMin:120,durationCapped:true,
+   exercises:SEED_EX_1026,
    notes:'Comeback day after 2-week break. Hip thrust, leg curl, leg press (iso, 10kg/side), lat pulldown, chest press, rear delt fly, dead bugs, plank. Treadmill 15 min, incline 3–4. Light loads, felt good. Leg extension skipped — add back next leg day.'},
 ];
 function migrateSessions(){
@@ -148,7 +151,14 @@ function migrateSessions(){
     if(s.durationMin>TIMER_MAX_MIN){s.durationMin=TIMER_MAX_MIN;s.durationCapped=true;changed=true}
   });
   SEED_SESSIONS.forEach(function(seed){
-    if(!all.some(function(s){return s.date===seed.date})){all.push(JSON.parse(JSON.stringify(seed)));changed=true}
+    const have=all.filter(function(s){return s.date===seed.date})[0];
+    if(!have){all.push(JSON.parse(JSON.stringify(seed)));changed=true;return}
+    // Older copy of the seeded session: give it the exercises from its notes.
+    if(have.id===seed.id&&!Array.isArray(have.exercises)){
+      have.exercises=seed.exercises.slice();
+      seed.groups.forEach(function(g){if(have.groups.indexOf(g)<0)have.groups.push(g)});
+      changed=true;
+    }
   });
   if(changed){S.cache.sessions=all;S.at.sessions=Date.now();lsWrite('sessions',all);lsWrite('__at',S.at);cloudWrite('sessions')}
 }

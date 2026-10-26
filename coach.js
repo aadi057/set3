@@ -33,36 +33,43 @@ const PLAN_RULES=[
   'Dizzy, shaky, sweaty out of nowhere, or any chest pain: stop, sit, eat something, and don\'t push through.',
 ];
 
-// Session plans. groups = what gets logged when you tap "Log this".
+// Session plans. moves = [exercise from the library, dose]. These are the
+// coach's picks; you can swap any of them per day. groups = what gets logged.
 const PLAN={
   lowerA:{title:'Lower A',sub:'Quads + core',kind:'lower',tone:'yellow',icon:'legs',groups:['legs','core','cardio'],
-    moves:[['Leg press','3 × 10–12'],['Goblet squat or hack squat','3 × 8–10'],['Seated leg curl','3 × 10–12'],['Leg extension','2 × 12–15'],['Standing calf raise','2 × 12–15'],['Dead bug','2 × 8 per side']],
-    finish:'Incline walk 15 min (incline 4–6, a pace you can talk at)'},
+    moves:[['Leg Press','3 × 10–12'],['Goblet Squat','3 × 8–10'],['Seated Leg Curl','3 × 10–12'],['Leg Extension','2 × 12–15'],['Standing Calf Raise','2 × 12–15'],['Dead Bug','2 × 8 per side'],['Treadmill Incline Walk','15 min']],
+    finish:'Walk at incline 4–6, at a pace where you can still talk.'},
   upperA:{title:'Upper A',sub:'Push + pull',kind:'upper',tone:'pink',icon:'chest',groups:['chest','back','shoulders','arms','cardio'],
-    moves:[['Chest press machine','3 × 8–12'],['Seated cable row','3 × 10–12'],['Shoulder press machine','2 × 10–12'],['Lat pulldown','2 × 10–12'],['Rear delt fly','2 × 12–15'],['Triceps pushdown','2 × 12'],['Dumbbell curl','2 × 12']],
-    finish:'Incline walk 15 min'},
+    moves:[['Chest Press Machine','3 × 8–12'],['Seated Cable Row','3 × 10–12'],['Shoulder Press Machine','2 × 10–12'],['Lat Pulldown','2 × 10–12'],['Rear Delt Fly (Dumbbell)','2 × 12–15'],['Tricep Pushdown (Rope)','2 × 12'],['Dumbbell Curl','2 × 12'],['Treadmill Incline Walk','15 min']],
+    finish:'Walk at incline 4–6, at a pace where you can still talk.'},
   lowerB:{title:'Lower B',sub:'Glutes + hamstrings',kind:'lower',tone:'yellow',icon:'legs',groups:['legs','core','cardio'],
-    moves:[['Hip thrust','3 × 10–12'],['Romanian deadlift (dumbbells)','3 × 8–10'],['Walking lunge or split squat','2 × 10 per leg'],['Lying leg curl','2 × 10–12'],['Hip abductor machine','2 × 15'],['Plank','2 × 30–45 s']],
-    finish:'Incline walk 15 min'},
+    moves:[['Hip Thrust (Machine)','3 × 10–12'],['Romanian Deadlift (Dumbbell)','3 × 8–10'],['Walking Lunge','2 × 10 per leg'],['Lying Leg Curl','2 × 10–12'],['Abductor Machine','2 × 15'],['Plank','2 × 30–45 s'],['Treadmill Incline Walk','15 min']],
+    finish:'Walk at incline 4–6, at a pace where you can still talk.'},
   upperB:{title:'Upper B',sub:'Back + shoulders',kind:'upper',tone:'pink',icon:'back',groups:['back','chest','shoulders','arms','cardio'],
-    moves:[['Lat pulldown','3 × 8–12'],['Incline dumbbell press','3 × 8–10'],['Single-arm dumbbell row','3 × 10 per arm'],['Lateral raise','3 × 12–15'],['Face pull','2 × 15'],['Hammer curl','2 × 12'],['Overhead triceps extension','2 × 12']],
-    finish:'Incline walk 15 min'},
-  full:{title:'Full body',sub:'Easing back in',kind:'full',tone:'green',icon:'gym',groups:['legs','chest','back','core'],
-    moves:[['Leg press','2 × 12'],['Chest press machine','2 × 12'],['Lat pulldown','2 × 12'],['Hip thrust','2 × 12'],['Seated cable row','2 × 12'],['Dead bug','2 × 8 per side']],
-    finish:'Easy walk 10 min. Keep 3–4 reps in the tank today; soreness should be mild.'},
-  cardio:{title:'Cardio day',sub:'Steady + core',kind:'cardio',tone:'blue',icon:'cardio',groups:['cardio','core'],
-    moves:[['Incline walk, bike or rower','35–45 min, easy'],['Dead bug','2 × 8 per side'],['Side plank','2 × 20–30 s per side'],['Hip flexor + hamstring stretch','5 min']],
-    finish:'Easy pace means you can talk in full sentences but couldn\'t sing.'},
-  long:{title:'Long cardio',sub:'Easy, longer',kind:'cardio',tone:'blue',icon:'cardio',groups:['cardio'],
-    moves:[['Outdoor walk, incline walk or cycling','45–60 min, easy'],['Mobility: cat-cow, hip circles, stretches','10 min']],
+    moves:[['Lat Pulldown','3 × 8–12'],['Incline Dumbbell Press','3 × 8–10'],['Dumbbell Row (Single Arm)','3 × 10 per arm'],['Lateral Raise (Dumbbell)','3 × 12–15'],['Face Pull','2 × 15'],['Hammer Curl','2 × 12'],['Overhead Tricep Extension','2 × 12'],['Treadmill Incline Walk','15 min']],
+    finish:'Walk at incline 4–6, at a pace where you can still talk.'},
+  full:{title:'Full body',sub:'Easing back in',kind:'full',tone:'green',icon:'gym',groups:['legs','chest','back','core','cardio'],
+    moves:[['Leg Press','2 × 12'],['Chest Press Machine','2 × 12'],['Lat Pulldown','2 × 12'],['Hip Thrust (Machine)','2 × 12'],['Seated Cable Row','2 × 12'],['Dead Bug','2 × 8 per side'],['Treadmill Incline Walk','10 min']],
+    finish:'Keep 3–4 reps in the tank today; soreness should be mild.'},
+  cardio:{title:'Cardio day',sub:'Steady + core',kind:'cardio',tone:'blue',icon:'cardio',groups:['cardio','core','mobility'],
+    moves:[['Treadmill Incline Walk','35–45 min, easy'],['Dead Bug','2 × 8 per side'],['Side Plank','2 × 20–30 s per side'],['Hip Flexor Stretch','2 × 30 s per side'],['Hamstring Stretch','2 × 30 s']],
+    finish:'Easy pace means you can talk in full sentences but couldn\'t sing. A bike or rower works too.'},
+  long:{title:'Long cardio',sub:'Easy, longer',kind:'cardio',tone:'blue',icon:'cardio',groups:['cardio','mobility'],
+    moves:[['Outdoor Brisk Walk','45–60 min, easy'],['Cat-Cow','2 × 10'],['Hip Circles','2 × 10 each way']],
     finish:'Splitting it into two shorter walks counts too.'},
   light:{title:'Light day',sub:'Walk + mobility',kind:'walk',tone:'green',icon:'mobility',groups:['mobility'],
-    moves:[['Easy walk, ideally outside in daylight','30–40 min'],['Mobility: cat-cow, hip circles, stretches','10 min']],
+    moves:[['Easy Walk','30–40 min, outside in daylight'],['Cat-Cow','2 × 10'],['Hip Flexor Stretch','2 × 30 s per side']],
     finish:'No heavy lifting today. You\'ll train better tomorrow.'},
   rest:{title:'Rest day',sub:'Recover',kind:'rest',tone:'green',icon:'bed',groups:['mobility'],
-    moves:[['Optional easy walk','20–30 min'],['Optional stretching','10 min']],
+    moves:[['Easy Walk','20–30 min, optional'],['Hamstring Stretch','optional']],
     finish:'Muscle is rebuilt on rest days. Eat your protein and get to bed on time.'},
 };
+function planDefaults(key){return PLAN[key]?PLAN[key].moves.map(function(m){return m[0]}):[]}
+function doseFor(name,key){
+  const P=PLAN[key];
+  if(P){for(let i=0;i<P.moves.length;i++){if(P.moves[i][0]===name)return P.moves[i][1]}}
+  return genericDose(name);
+}
 const STRENGTH_KEYS=['lowerA','upperA','lowerB','upperB','full'];
 
 // ── Reading your history ──────────────────────────────
