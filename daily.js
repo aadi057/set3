@@ -311,7 +311,7 @@ function ckBuild(keepScroll){
   if(keepScroll){const m=document.querySelector('#ov-ck .modal');if(m)m.scrollTop=st}
 }
 function tgRow(key,icon,tone,title,sub,on,locked){
-  return '<div class="tg-row'+(locked?' locked':'')+'"'+(locked?'':' role="switch" tabindex="0" aria-checked="'+on+'" onclick="ckToggle(\''+key+'\')" onkeydown="if(event.key===\' \'||event.key===\'Enter\'){event.preventDefault();ckToggle(\''+key+'\')}"')+'>'
+  return '<div class="tg-row'+(locked?' locked':'')+'" data-k="'+key+'"'+(locked?'':' role="switch" tabindex="0" aria-checked="'+on+'" onclick="ckToggle(\''+key+'\')" onkeydown="if(event.key===\' \'||event.key===\'Enter\'){event.preventDefault();ckToggle(\''+key+'\')}"')+'>'
     +'<span class="dot t-'+tone+'">'+ic(icon)+'</span>'
     +'<span class="tg-main"><b>'+title+'</b><small>'+sub+'</small></span>'
     +'<span class="switch'+(on?' on':'')+'"></span></div>';
@@ -319,13 +319,22 @@ function tgRow(key,icon,tone,title,sub,on,locked){
 function ckSet(k,v,silent){
   _ck[k]=v;
   if(ckHasContent(_ck))ckPut(_ck);
-  if(!silent&&(k==='mood'||k==='bed'||k==='wake'))ckBuild(true);
+  if(k==='mood'){
+    document.querySelectorAll('#ov-ck .mood button').forEach(function(b,i){b.classList.toggle('on',i+1===v)});
+    return;
+  }
+  if(!silent&&(k==='bed'||k==='wake'))ckBuild(true);
 }
 function ckToggle(k){
   if(k==='move'){const h=ckHabits(_ck);_ck.move=!h.move}
   else _ck[k]=!_ck[k];
   if(ckHasContent(_ck))ckPut(_ck);
-  ckBuild(true);
+  const row=document.querySelector('#ov-ck .tg-row[data-k="'+k+'"]');
+  if(!row){ckBuild(true);return}
+  const h=ckHabits(_ck),on=k==='enjoyed'?!!_ck.enjoyed:!!h[k];
+  row.setAttribute('aria-checked',on);
+  const sw=row.querySelector('.switch');if(sw)sw.classList.toggle('on',on);
+  if(k==='move'){const sm=row.querySelector('small');if(sm)sm.textContent=h.moveAuto?'Ticked by your logged workout':'A walk outside counts'}
 }
 function ckClose(){
   if(!_ck)return;

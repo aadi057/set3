@@ -13,18 +13,42 @@ const DOW_F=['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturd
 let _tt;
 function toast(msg){const el=document.getElementById('toast');el.textContent=msg;el.classList.add('show');clearTimeout(_tt);_tt=setTimeout(function(){el.classList.remove('show')},2200)}
 let _ovClose=null;
-function closeOverlays(){document.querySelectorAll('.ov').forEach(function(o){o.remove()});_ovClose=null}
+function closeOverlays(immediate){
+  document.querySelectorAll('.ov').forEach(function(o){
+    if(immediate||o.classList.contains('closing')||matchMedia('(prefers-reduced-motion: reduce)').matches){o.remove();return}
+    o.classList.add('closing');setTimeout(function(){o.remove()},210);
+  });
+  _ovClose=null;
+}
+// Drag a sheet down from its top to dismiss it (phones).
+function enableDrag(ov){
+  const m=ov.querySelector('.modal');if(!m)return;
+  let y0=null,dy=0,t0=0;
+  m.addEventListener('touchstart',function(e){if(m.scrollTop>0||e.touches.length>1)return;y0=e.touches[0].clientY;dy=0;t0=Date.now()},{passive:true});
+  m.addEventListener('touchmove',function(e){
+    if(y0==null)return;dy=e.touches[0].clientY-y0;
+    if(dy<=0){m.style.transform='';return}
+    m.classList.add('dragging');m.style.transform='translateY('+(dy<120?dy:120+(dy-120)*.5)+'px)';
+  },{passive:true});
+  m.addEventListener('touchend',function(){
+    if(y0==null)return;
+    const fast=dy>40&&(Date.now()-t0)<250;
+    m.classList.remove('dragging');y0=null;
+    if(dy>110||fast){ov._bd();return}
+    m.classList.add('settle');m.style.transform='';setTimeout(function(){m.classList.remove('settle')},300);
+  });
+}
 function openModal(id,inner,onBackdrop,kind){
   // Re-rendering an open sheet swaps its content in place (no re-animation, scroll kept).
   const open=document.getElementById(id||'ov');
-  if(open&&open.classList.contains('ov')&&open.classList.contains('is-sheet')===(kind==='sheet')){
+  if(open&&open.classList.contains('ov')&&!open.classList.contains('closing')&&open.classList.contains('is-sheet')===(kind==='sheet')){
     const m=open.querySelector('.modal'),st=m.scrollTop;
     m.innerHTML=inner;m.scrollTop=st;
     _ovClose=onBackdrop||closeOverlays;
     open._bd=onBackdrop||closeOverlays;
     return;
   }
-  closeOverlays();
+  closeOverlays(true);
   const ov=document.createElement('div');
   ov.className='ov'+(kind==='sheet'?' is-sheet':'');ov.id=id||'ov';
   ov.innerHTML='<div class="modal" role="dialog" aria-modal="true">'+inner+'</div>';
@@ -32,6 +56,7 @@ function openModal(id,inner,onBackdrop,kind){
   ov.addEventListener('click',function(e){if(e.target===ov)ov._bd()});
   _ovClose=onBackdrop||closeOverlays;
   document.body.appendChild(ov);
+  enableDrag(ov);
   const f=ov.querySelector('[autofocus]');if(f)setTimeout(function(){f.focus()},60);
 }
 function openSheet(inner){openModal('ov-sheet','<div class="grab"></div>'+inner,null,'sheet')}
@@ -40,7 +65,7 @@ function askConfirm(title,body,yes,onYes,danger){
   openSheet('<h3>'+title+'</h3><p class="hint">'+body+'</p>'
     +'<div class="row-btns"><button class="btn ghost" onclick="closeOverlays()">Cancel</button>'
     +'<button class="btn'+(danger?' danger':'')+'" id="confirm-yes">'+yes+'</button></div>');
-  document.getElementById('confirm-yes').onclick=function(){closeOverlays();onYes()};
+  document.getElementById('confirm-yes').onclick=function(){closeOverlays(true);onYes()};
 }
 function listRow(icon,tone,title,sub,onclick,badge){
   return '<button class="row" onclick="'+onclick+'"><span class="dot t-'+tone+'">'+ic(icon)+'</span>'
@@ -53,11 +78,15 @@ function groupChip(k){const G=GROUP(k);return G?'<span class="gchip t-'+G.tone+'
 // ── Router ─────────────────────────────────────────────
 let cur='today';
 const NAV_OF={today:'today',gym:'gym',history:'history',daily:'daily',profile:'profile',body:'profile'};
+let _enterT=null;
 function go(tab){
   closeOverlays();
   document.querySelectorAll('.screen').forEach(function(s){s.classList.toggle('active',s.id==='screen-'+tab)});
   document.querySelectorAll('[data-tab]').forEach(function(t){const on=t.dataset.tab===NAV_OF[tab];t.classList.toggle('on',on);if(on)t.setAttribute('aria-current','page');else t.removeAttribute('aria-current')});
-  cur=tab;RENDER[tab]();
+  cur=tab;document.body.dataset.screen=tab;
+  const scr=document.getElementById('screen-'+tab);
+  scr.classList.remove('enter');RENDER[tab]();void scr.offsetWidth;scr.classList.add('enter');
+  clearTimeout(_enterT);_enterT=setTimeout(function(){scr.classList.remove('enter')},900);
   window.scrollTo(0,0);
 }
 function rerender(){RENDER[cur]();renderChrome()}
@@ -87,11 +116,46 @@ function ringSVG(){
     const rad=function(a){return a*Math.PI/180};
     const x0=c+r*Math.cos(rad(a0)),y0=c+r*Math.sin(rad(a0)),x1=c+r*Math.cos(rad(a1)),y1=c+r*Math.sin(rad(a1));
     const on=st.groups[G.k].n7>0;if(on)hit++;
-    arcs+='<path d="M'+x0.toFixed(1)+' '+y0.toFixed(1)+' A'+r+' '+r+' 0 0 1 '+x1.toFixed(1)+' '+y1.toFixed(1)+'" class="arc '+(on?'s-'+G.tone:'off')+'"><title>'+G.label+(on?': trained this week':': not yet this week')+'</title></path>';
+    const d='M'+x0.toFixed(1)+' '+y0.toFixed(1)+' A'+r+' '+r+' 0 0 1 '+x1.toFixed(1)+' '+y1.toFixed(1);
+    arcs+='<g class="seg-g" style="--i:'+i+'" role="button" tabindex="0" aria-label="'+G.label+(on?', trained this week':', not yet this week')+'" onclick="openGroupInsight(\''+G.k+'\')" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();openGroupInsight(\''+G.k+'\')}">'
+      +'<path d="'+d+'" class="arc '+(on?'s-'+G.tone:'off')+'"></path><path d="'+d+'" class="arc-hit"></path>';
     const xm=c+r*Math.cos(rad(am)),ym=c+r*Math.sin(rad(am));
-    icons+='<svg x="'+(xm-10).toFixed(1)+'" y="'+(ym-10).toFixed(1)+'" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="ring-ic'+(on?'':' off')+'">'+ICONS[G.icon]+'</svg>';
+    arcs+='<svg x="'+(xm-10).toFixed(1)+'" y="'+(ym-10).toFixed(1)+'" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="ring-ic'+(on?'':' off')+'">'+ICONS[G.icon]+'</svg></g>';
   });
-  return {svg:'<svg viewBox="0 0 300 300" class="ring-svg" role="img" aria-label="'+hit+' of '+n+' groups trained in the last 7 days">'+arcs+icons+'</svg>',hit:hit,n:n};
+  return {svg:'<svg viewBox="0 0 300 300" class="ring-svg" aria-label="'+hit+' of '+n+' muscle groups trained in the last 7 days">'+arcs+icons+'</svg>',hit:hit,n:n};
+}
+
+function openGroupInsight(k){
+  const G=GROUP(k),info=GROUP_INFO[k]||{},td=today();
+  const st=coachStats(addDays(td,1)),g=st.groups[k];
+  const since=g.last?daysBetween(g.last,td):null;
+  const from=addDays(td,-6);
+  const hits=getSess().filter(function(s){return s.date>=from&&s.date<=td&&(s.groups||[]).indexOf(k)>=0}).sort(function(a,b){return b.date.localeCompare(a.date)});
+  let status,line;
+  if(since===0){status='Trained today';line='Done for today. Give it about 48 hours before training it hard again.'}
+  else if(since===1&&COACH_BLOCKING.indexOf(k)>=0){status='Recovering';line='Trained yesterday. Ready again from tomorrow; light work is fine today.'}
+  else if(G.target&&g.n7>=G.target){status='Target met';line='You\'ve hit '+g.n7+' of '+G.target+' this week. Anything more is a bonus.'}
+  else if(!G.target){status=g.n7?'Done this week':'Optional';line=g.n7?'Logged '+g.n7+' time'+(g.n7>1?'s':'')+' in the last 7 days.':'No weekly target. Use it on rest days or after a hard session.'}
+  else{status='Ready';line=(G.target-g.n7)+' more session'+(G.target-g.n7>1?'s':'')+' to reach '+G.target+' this week.'+(since==null?' Not trained yet.':' Last trained '+agoText(since)+'.')}
+  const rec=recommend(td);
+  const inRec=rec.groups.indexOf(k)>=0;
+  const pct=G.target?Math.min(100,Math.round(g.n7/G.target*100)):(g.n7?100:0);
+  const canLog=!getSess().some(function(s){return s.date===td&&(s.groups||[]).indexOf(k)>=0});
+  openSheet('<div class="ins-head"><span class="dot big t-'+G.tone+'">'+ic(G.icon)+'</span><div><div class="eyebrow">Last 7 days</div><h3>'+G.label+'</h3></div><span class="st '+(status==='Ready'?'ready':status==='Recovering'?'rec':'on')+'">'+status+'</span></div>'
+    +'<div class="ins-count"><b>'+g.n7+'</b><span>'+(G.target?'of '+G.target+' sessions this week':'sessions this week')+'</span></div>'
+    +'<div class="meter big"><i class="s-'+G.tone+'" style="width:'+pct+'%"></i></div>'
+    +'<p class="ins-line">'+line+'</p>'
+    +(hits.length?'<div class="chips wrap">'+hits.map(function(s){return '<span class="chip">'+fmtD(s.date)+'</span>'}).join('')+'</div>':'')
+    +'<div class="ins-box"><b>What it is</b><p>'+esc(info.what||'')+'</p><b>Why it matters for you</b><p>'+esc(info.why||'')+'</p>'
+    +'<b>Moves to pick from</b><ul>'+(info.moves||[]).map(function(m){return '<li>'+esc(m)+'</li>'}).join('')+'</ul></div>'
+    +(inRec?'<p class="hint">'+ic('sparkles')+'Part of today\'s suggestion: '+esc(rec.title.toLowerCase())+'.</p>':'')
+    +'<div class="row-btns"><button class="btn ghost" onclick="closeOverlays()">Close</button>'
+    +(canLog?'<button class="btn" onclick="closeOverlays();logGroupToday(\''+k+'\')">Log it today</button>':'')+'</div>');
+}
+function logGroupToday(k){
+  const ex=getSess().filter(function(s){return s.date===today()})[0];
+  const gs=ex?(ex.groups||[]).slice():[];if(gs.indexOf(k)<0)gs.push(k);
+  openLog(today(),gs);
 }
 
 // ══════════════════════════════════════════════════════
@@ -102,17 +166,9 @@ function renderToday(){
   const td=today(),p=getProfile(),sessions=getSess();
   const streak=calcStreak();
   const ring=ringSVG();
-  const todays=sessions.filter(function(s){return s.date===td});
-  const rec=recommend(td);
   const empty=!sessions.length&&!ckAll().length;
 
-  const coach=todays.length
-    ?'<section class="card tone-pink coach"><div class="eyebrow">Coach</div><h3>Done today: '+esc(sessionLabel(todays[0].groups))+'</h3>'
-      +'<p>Tomorrow looks like <b>'+esc(recommend(addDays(td,1)).title.toLowerCase())+'</b>. Recovery is part of the plan.</p>'
-      +'<div class="row-btns"><button class="btn" onclick="go(\'gym\')">Open gym</button></div></section>'
-    :'<section class="card tone-pink coach"><div class="eyebrow">Coach · today</div><h3>'+esc(rec.title)+'</h3>'
-      +'<p>'+esc(rec.reasons[0])+'</p>'
-      +'<div class="row-btns"><button class="btn" onclick="logFromRec()">Log this</button><button class="btn ghost" onclick="go(\'gym\')">Why this</button></div></section>';
+  const coach=coachCard(true);
 
   const restore=empty?'<section class="card tone-blue cta" onclick="go(\'profile\')"><div class="eyebrow">New here</div><h3>Bring your history over</h3><p>In the old app, open Export and download a backup. Then restore it from your profile here.</p><span class="btn sm">Open profile</span></section>':'';
 
@@ -120,8 +176,10 @@ function renderToday(){
     +'<header class="hello"><div class="eyebrow">'+fmtDLong(td)+'</div><h1>'+greeting()+', '+esc(p.name)+'</h1><p class="muted">How are you feeling today?</p></header>'
     +'<div class="cols">'
     +'<div class="col">'
-    +'<section class="ring" onclick="go(\'gym\')">'+ring.svg
+    +homeTimerCard()
+    +'<section class="ring">'+ring.svg
     +'<div class="ring-mid"><b>'+streak+'</b><span>day streak</span><small>'+ring.hit+' of '+ring.n+' groups this week</small></div></section>'
+    +'<p class="ring-hint">Tap a segment to see that muscle group\'s week</p>'
     +'<div class="actions"><button class="btn big" onclick="openLog(today())">'+ic('plus')+'Log workout</button>'
     +'<button class="circle" onclick="timerToggle()" aria-label="Workout timer" id="today-timer">'+ic(getTimer()?'stop':'timer')+'</button>'
     +'<button class="circle" onclick="ckOpen(ckDay())" aria-label="Daily check-in">'+ic('daily')+'</button></div>'
@@ -135,42 +193,130 @@ function renderToday(){
 // GYM — timer, coach, weekly coverage
 // ══════════════════════════════════════════════════════
 function renderGym(){
-  const td=today(),rec=recommend(td);
+  const td=today();
   const st=coachStats(addDays(td,1));
-  const todays=getSess().filter(function(s){return s.date===td});
   const t=getTimer();
   const timer='<section class="card timer'+(t?' running':'')+'">'
-    +'<div><div class="eyebrow">Workout timer</div><b id="timer-big">'+(t?fmtElapsed(Date.now()-t.startTs):'00:00')+'</b>'
-    +'<small>'+(t?'Running since '+new Date(t.startTs).toLocaleTimeString('en-IN',{hour:'numeric',minute:'2-digit'}):'Adds the time to today\'s session')+'</small></div>'
+    +'<div><div class="eyebrow">Workout timer</div><b id="timer-big">'+(t?fmtElapsed(timerElapsedMs(t)):'00:00')+'</b>'
+    +'<small>'+(t?'Since '+new Date(t.startTs).toLocaleTimeString('en-IN',{hour:'numeric',minute:'2-digit'})+' · stops itself at 2h':'Stops itself at 2 hours')+'</small></div>'
     +'<button class="play" onclick="timerToggle()" aria-label="'+(t?'Stop timer':'Start timer')+'">'+ic(t?'stop':'play')+'</button></section>';
-
-  const done=todays.length?'<p class="done-line">'+ic('check')+'Logged today: <b>'+esc(sessionLabel(todays[0].groups))+'</b></p>':'';
-  const coach='<section class="card tone-pink coach big">'
-    +'<div class="eyebrow">Coach · '+(todays.length?'already trained today':'today')+'</div>'
-    +'<h3>'+esc(rec.title)+'</h3>'
-    +(rec.groups.length?'<div class="chips wrap">'+rec.groups.map(groupChip).join('')+'</div>':'')
-    +(rec.template?'<p class="eg"><b>Example:</b> '+esc(rec.template.eg)+'</p>':'')
-    +'<ul class="why">'+rec.reasons.map(function(r){return '<li>'+esc(r)+'</li>'}).join('')+'</ul>'
-    +(rec.alt?'<p class="alt">Or: '+esc(rec.alt)+'</p>':'')
-    +done
-    +'<div class="row-btns"><button class="btn" onclick="logFromRec()">Log this</button><button class="btn ghost" onclick="openLog(today())">Something else</button></div>'
-    +'<button class="link" onclick="openSources()">'+ic('info')+'How the coach decides</button>'
-    +'</section>';
-
   const tiles='<div class="tiles">'
     +tile('yellow','Strength days',st.strengthDays7,STRENGTH_DAYS_TARGET,'last 7 days')
-    +tile('blue','Cardio sessions',st.cardio7,CARDIO_TARGET,'last 7 days')
+    +tile('blue','Cardio days',st.cardio7,CARDIO_TARGET,'last 7 days')
     +tile('green','Day streak',calcStreak(),null,'rest days don\'t break it')
     +'</div>';
-
   document.getElementById('screen-gym').innerHTML=''
     +'<header class="page-head"><div><div class="eyebrow">Training</div><h1>Gym</h1></div>'
     +'<button class="circle" onclick="openLog(today())" aria-label="Log workout">'+ic('plus')+'</button></header>'
     +'<div class="cols">'
-    +'<div class="col">'+timer+coach+'</div>'
-    +'<div class="col"><h2 class="sec">This week</h2>'+tiles+weekGroupsCard()+'</div>'
-    +'<div class="col"><h2 class="sec">Your baseline</h2>'+baselineCard()+'</div>'
+    +'<div class="col">'+timer+coachCard(false)+'</div>'
+    +'<div class="col"><h2 class="sec">This week</h2>'+weekStripCard()+tiles+weekGroupsCard()+'</div>'
+    +'<div class="col"><h2 class="sec">Your plan</h2>'+planCard()+baselineCard()+'</div>'
     +'</div>';
+}
+
+// ── Coach card (Today: compact, Gym: full) ─────────────
+function coachCard(compact){
+  const td=today();
+  const done=getSess().filter(function(s){return s.date===td&&(s.groups||[]).length})[0];
+  if(done){
+    const tm=addDays(td,1),next=projectDays(td,2)[tm];
+    const dayName=new Date(tm+'T00:00:00').toLocaleDateString('en-IN',{weekday:'long'});
+    return '<section class="card tone-pink coach'+(compact?'':' big')+'"><div class="eyebrow">Coach · done for today</div>'
+      +'<h3>'+esc(sessTitle(done))+'</h3>'
+      +(compact?'':'<div class="chips wrap">'+(done.groups||[]).map(groupChip).join('')+'</div>')
+      +'<div class="next-up"><span class="dot t-'+next.plan.tone+'">'+ic(next.plan.icon)+'</span><div><small>Next up · '+dayName+'</small><b>'+esc(next.title)+'</b><p>'+esc(next.reasons[0])+'</p></div></div>'
+      +'<div class="row-btns"><button class="btn" onclick="openPlanDay(\''+tm+'\')">'+dayName+'\'s plan</button>'
+      +(compact?'':'<button class="btn ghost" onclick="openLog(today())">Edit today</button>')+'</div>'
+      +(compact?'':'<button class="link" onclick="openSources()">'+ic('info')+'How the coach decides</button>')
+      +'</section>';
+  }
+  const rec=recommend(td);
+  const reasons=compact?rec.reasons.slice(0,1):rec.reasons;
+  return '<section class="card tone-pink coach'+(compact?'':' big')+'"><div class="eyebrow">Coach · today</div>'
+    +'<h3>'+esc(rec.title)+' <span class="h-sub">'+esc(rec.sub)+'</span></h3>'
+    +(compact?'':'<div class="chips wrap">'+rec.groups.map(groupChip).join('')+'</div><div class="why-lbl">Why today</div>')
+    +'<ul class="why'+(compact?' compact':'')+'">'+reasons.map(function(r){return '<li>'+esc(r)+'</li>'}).join('')+'</ul>'
+    +'<div class="row-btns">'+(rec.key==='rest'?'':'<button class="btn" onclick="logFromRec()">Log this</button>')
+    +'<button class="btn ghost" onclick="openPlanDay(today())">See the session</button></div>'
+    +(compact?'':'<button class="link" onclick="openSources()">'+ic('info')+'How the coach decides</button>')
+    +'</section>';
+}
+
+// Simulate the coming days assuming you follow each suggestion.
+function projectDays(from,n){
+  const sim=getSess().slice(),out={};
+  for(let i=0;i<n;i++){
+    const iso=addDays(from,i);
+    const logged=sim.filter(function(s){return s.date===iso&&(s.groups||[]).length})[0];
+    if(logged)continue;
+    const rec=recommend(iso,sim);out[iso]=rec;
+    if(rec.key!=='rest')sim.push({id:'sim'+i,date:iso,groups:rec.groups,plan:rec.key});
+  }
+  return out;
+}
+const STRIP_LBL={lowerA:'Lower A',lowerB:'Lower B',upperA:'Upper A',upperB:'Upper B',full:'Full',cardio:'Cardio',long:'Long',light:'Light',rest:'Rest'};
+const STRIP_SHORT={'Lower A':'Leg A','Lower B':'Leg B','Upper A':'Up A','Upper B':'Up B','Lower':'Legs','Upper':'Upper'};
+const KIND_LBL={lower:'Lower',upper:'Upper',full:'Full',cardio:'Cardio',walk:'Walk',none:'—'};
+function weekStripCard(){
+  const days=weekPlan();
+  const cells=days.map(function(d){
+    const dow=new Date(d.date+'T00:00:00').toLocaleDateString('en-IN',{weekday:'short'}).slice(0,1);
+    const num=parseInt(d.date.slice(8),10);
+    let tone='off',icon='bed',label='Rest',cls=d.state;
+    if(d.session){const k=sessionKind(d.session);const P=d.session.plan&&PLAN[d.session.plan];tone=P?P.tone:(k==='lower'?'yellow':k==='upper'?'pink':k==='full'?'green':'blue');icon=P?P.icon:(k==='lower'?'legs':k==='upper'?'chest':k==='full'?'gym':k==='cardio'?'cardio':'mobility');label=P?STRIP_LBL[d.session.plan]:KIND_LBL[k]}
+    else if(d.rec){tone=d.rec.key==='rest'?'off':d.rec.plan.tone;icon=d.rec.plan.icon;label=STRIP_LBL[d.rec.key]}
+    else{label='—'}
+    return '<button class="wd '+cls+(d.today?' is-today':'')+'" onclick="openPlanDay(\''+d.date+'\')" aria-label="'+fmtD(d.date)+': '+esc(label)+(d.state==='done'?', done':d.state==='planned'?', planned':'')+'">'
+      +'<span class="wd-top"><i>'+dow+'</i><b>'+num+'</b></span>'
+      +'<span class="wd-dot '+(tone==='off'?'off':'t-'+tone)+'">'+ic(d.state==='done'?'check':icon)+'</span>'
+      +'<span class="wd-lbl"><span class="l-long">'+esc(label)+'</span><span class="l-short">'+esc(STRIP_SHORT[label]||label)+'</span></span></button>';
+  }).join('');
+  return '<section class="card week-strip"><div class="wd-row">'+cells+'</div>'
+    +'<p class="small muted wd-note">Ticks are done. Faded days are the plan if you follow it; it adjusts to whatever you actually log.</p></section>';
+}
+function planCard(){
+  const typical=[['Mon','lowerA'],['Tue','upperA'],['Wed','cardio'],['Thu','lowerB'],['Fri','upperB'],['Sat','long'],['Sun','rest']];
+  return '<section class="card plan-card"><h3>Upper/lower, 4 + 2 + 1</h3>'
+    +'<p class="small">Four strength days, two cardio days, one rest day. Each muscle is trained twice a week with 48 hours between, and every strength day ends with a 15-minute incline walk.</p>'
+    +'<div class="plan-week">'+typical.map(function(t){const P=PLAN[t[1]];return '<div class="pw"><span>'+t[0]+'</span><i class="t-'+P.tone+'"></i><b>'+P.title+'</b><small>'+P.sub+'</small></div>'}).join('')+'</div>'
+    +'<p class="small">Missed a day? Nothing breaks. The coach just moves to the next session in the rotation.</p>'
+    +'<button class="link" onclick="openLiftRules()">'+ic('list')+'How to lift on this plan</button>'
+    +'<button class="link" onclick="openSources()">'+ic('bookopen')+'The research behind it</button></section>';
+}
+function openLiftRules(){
+  openSheet('<h3>How to lift on this plan</h3><ol class="rules small-rules">'+PLAN_RULES.map(function(r){return '<li>'+esc(r)+'</li>'}).join('')+'</ol>'
+    +'<div class="row-btns"><button class="btn" onclick="closeOverlays()">Got it</button></div>');
+}
+function openPlanDay(date){
+  const td=today();
+  const logged=getSess().filter(function(s){return s.date===date&&(s.groups||[]).length})[0];
+  const head=function(eyebrow,title,sub,tone,icon){return '<div class="ins-head"><span class="dot big t-'+tone+'">'+ic(icon)+'</span><div><div class="eyebrow">'+eyebrow+'</div><h3>'+esc(title)+(sub?' <span class="h-sub">'+esc(sub)+'</span>':'')+'</h3></div></div>'};
+  const movesTable=function(P){
+    return '<div class="moves">'+P.moves.map(function(m){return '<div class="mv"><b>'+esc(m[0])+'</b><span>'+esc(m[1])+'</span></div>'}).join('')+'</div>'
+      +(P.finish?'<p class="hint">'+ic('cardio')+esc(P.finish)+'</p>':'');
+  };
+  if(logged){
+    const P=logged.plan&&PLAN[logged.plan];
+    openSheet(head(fmtDLong(date)+' · done',sessTitle(logged),P?P.sub:'',P?P.tone:'green','check')
+      +'<div class="chips wrap">'+(logged.groups||[]).map(groupChip).join('')+'</div>'
+      +(logged.notes?'<p class="note-block" style="margin-top:12px">'+esc(logged.notes)+'</p>':'')
+      +(P?'<label class="lbl">The plan for this session</label>'+movesTable(P):'')
+      +'<div class="row-btns"><button class="btn ghost" onclick="closeOverlays()">Close</button>'+(isLocked(date)?'':'<button class="btn" onclick="closeOverlays();openLog(\''+date+'\')">Edit</button>')+'</div>');
+    return;
+  }
+  if(date<td){
+    openSheet(head(fmtDLong(date),'Nothing logged','', 'blue','bed')+'<p class="hint">That\'s fine. The plan doesn\'t make you catch up; it continues from your next session.</p><div class="row-btns"><button class="btn" onclick="closeOverlays()">Close</button></div>');
+    return;
+  }
+  const rec=projectDays(td,daysBetween(td,date)+1)[date];
+  const P=rec.plan;
+  openSheet(head((date===td?'Today':new Date(date+'T00:00:00').toLocaleDateString('en-IN',{weekday:'long',day:'numeric',month:'short'}))+(date===td?'':' · planned'),rec.title,rec.sub,P.tone,P.icon)
+    +'<div class="why-lbl">Why '+(date===td?'today':'this day')+'</div><ul class="why">'+rec.reasons.slice(0,3).map(function(r){return '<li>'+esc(r)+'</li>'}).join('')+'</ul>'
+    +(date===td?'':'<p class="hint">'+ic('info')+'Assumes you follow the plan until then. It updates as you log.</p>')
+    +'<label class="lbl">The session</label>'+movesTable(P)
+    +(['lower','upper','full'].indexOf(P.kind)>=0?'<button class="link" onclick="openLiftRules()">'+ic('list')+'How to lift: reps in the tank, rest, moving up</button>':'')
+    +'<div class="row-btns"><button class="btn ghost" onclick="closeOverlays()">Close</button>'+(date===td&&rec.key!=='rest'?'<button class="btn" onclick="closeOverlays();logFromRec()">Log this</button>':'')+'</div>');
 }
 function tile(tone,label,val,target,sub){
   return '<div class="tile t-'+tone+'"><span>'+label+'</span><b>'+val+(target!=null?'<small>/'+target+'</small>':'')+'</b><small>'+sub+'</small></div>';
@@ -229,7 +375,7 @@ function calendarCard(){
     const iso=yr+'-'+String(mo+1).padStart(2,'0')+'-'+String(d).padStart(2,'0');
     const s=byDate[iso],fut=iso>td;
     const tone=s?(GROUP(s.groups[0])||{tone:'yellow'}).tone:null;
-    cells+='<button class="cd'+(s?' t-'+tone:'')+(iso===td?' td':'')+(fut?' fut':'')+'"'+(fut?' disabled':' onclick="openLog(\''+iso+'\')"')+' aria-label="'+fmtD(iso)+(s?', '+esc(sessionLabel(s.groups)):'')+'">'+d+'</button>';
+    cells+='<button class="cd'+(s?' t-'+tone:'')+(iso===td?' td':'')+(fut?' fut':'')+'"'+((fut||(!s&&isLocked(iso)))?' disabled':' onclick="openLog(\''+iso+'\')"')+' aria-label="'+fmtD(iso)+(s?', '+esc(sessTitle(s)):'')+'">'+d+'</button>';
   }
   const canNext=_calMonth<td.slice(0,7);
   return '<section class="card cal"><div class="card-head"><button class="circle sm" onclick="calShift(-1)" aria-label="Previous month">'+ic('left')+'</button>'
@@ -280,7 +426,7 @@ function sessRow(s){
   if(s.durationMin)extra.push(s.durationMin+' min');
   if(s.legacy&&s.legacy.length)extra.push(s.legacy.length+' exercises in old log');
   return '<button class="row sess" onclick="openSess(\''+s.id+'\')"><span class="dot t-'+G.tone+'">'+ic(G.icon)+'</span>'
-    +'<span class="row-main"><small>'+fmtD(s.date)+'</small><b>'+esc(sessionLabel(s.groups))+'</b>'
+    +'<span class="row-main"><small>'+fmtD(s.date)+'</small><b>'+esc(sessTitle(s))+'</b>'
     +((s.groups||[]).length>1?'<span class="mini-chips">'+s.groups.map(function(k){const g=GROUP(k);return g?'<i class="t-'+g.tone+'">'+g.short+'</i>':''}).join('')+'</span>':'')
     +(s.notes?'<small class="note-sm">'+esc(s.notes)+'</small>':'')
     +(extra.length?'<small>'+extra.join(' · ')+'</small>':'')+'</span>'
@@ -291,11 +437,18 @@ function sessRow(s){
 // WORKOUT LOGGER — pick what you trained, that's it
 // ══════════════════════════════════════════════════════
 let _s=null,_sEditing=false;
-function openLog(date,preset){
+// A day locks once it's over (4am the next morning, same as check-ins).
+function isLocked(date){return date<ckDay()}
+function openLog(date,preset,planKey){
   const ex=getSess().filter(function(s){return s.date===date})[0];
+  if(isLocked(date)){
+    if(ex){openSess(ex.id);return}
+    toast(fmtD(date)+' is over, so it can\'t be logged now');return;
+  }
   if(ex&&!preset){openSess(ex.id);return}
   _s=ex?JSON.parse(JSON.stringify(ex)):{id:uid(),date:date,groups:[],notes:''};
   if(preset)_s.groups=preset.slice();
+  if(planKey)_s.plan=planKey;
   _sEditing=!!ex;
   buildLog();
 }
@@ -303,41 +456,59 @@ function openSess(id){
   const f=getSess().filter(function(s){return s.id===id})[0];if(!f)return;
   _s=JSON.parse(JSON.stringify(f));_sEditing=true;buildLog();
 }
-function logFromRec(){openLog(today(),recommend(today()).groups)}
+function logFromRec(){const r=recommend(today());openLog(today(),r.groups,r.key)}
+function buildLockedLog(){
+  const s=_s;
+  openModal('ov-log','<header class="modal-head"><div><div class="eyebrow">'+fmtDLong(s.date)+'</div><h2>'+esc(sessTitle(s))+'</h2></div>'
+    +'<button class="circle" onclick="closeOverlays()" aria-label="Close">'+ic('x')+'</button></header>'
+    +'<div class="chips wrap">'+(s.groups||[]).map(groupChip).join('')+'</div>'
+    +(s.durationMin?'<p class="hint">'+ic('timer')+' '+s.durationMin+' min'+(s.durationCapped?' (timer capped at 2 hours)':'')+'</p>':'')
+    +(s.notes?'<label class="lbl">Notes</label><p class="note-block">'+esc(s.notes)+'</p>':'')
+    +(s.legacy&&s.legacy.length?'<p class="hint">From the old log: '+esc(s.legacy.join(', '))+'</p>':'')
+    +'<p class="locked-line">'+ic('lock')+'This day is over, so the workout is locked.</p>'
+    +'<div class="row-btns"><button class="btn" onclick="closeOverlays()">Close</button></div>');
+}
 function buildLog(){
+  if(isLocked(_s.date)){buildLockedLog();return}
   const isToday=_s.date===today();
   const rec=isToday?recommend(_s.date):null;
   const sug=rec?rec.groups:[];
-  const quick=TEMPLATES.map(function(t){return '<button class="chip" onclick="logPreset(\''+t.k+'\')">'+t.label+'</button>'}).join('')
-    +'<button class="chip" onclick="logPresetGroups([\'cardio\'])">Cardio only</button>';
+  const quick=['lowerA','upperA','lowerB','upperB','full','cardio','long'].map(function(k){return '<button class="chip'+(_s.plan===k?' on':'')+'" data-plan="'+k+'" onclick="logPreset(\''+k+'\')">'+PLAN[k].title+'</button>'}).join('');
   const tiles=GROUPS.map(function(G){
     const on=_s.groups.indexOf(G.k)>=0,s=sug.indexOf(G.k)>=0;
-    return '<button class="gtile'+(on?' on t-'+G.tone:'')+'" aria-pressed="'+on+'" onclick="logToggle(\''+G.k+'\')">'
+    return '<button class="gtile'+(on?' on t-'+G.tone:'')+'" data-k="'+G.k+'" data-sug="'+(s?1:0)+'" aria-pressed="'+on+'" onclick="logToggle(\''+G.k+'\')">'
       +'<span class="dot t-'+G.tone+'">'+ic(G.icon)+'</span><b>'+G.label+'</b>'
       +(s&&!on?'<em>Suggested</em>':'')+(on?'<span class="tick">'+ic('check')+'</span>':'')+'</button>';
   }).join('');
-  openModal('ov-log','<header class="modal-head"><div><div class="eyebrow">'+(isToday?'Today · ':'')+fmtD(_s.date)+'</div><h2>'+(_sEditing?'Edit workout':'What did you train?')+'</h2></div>'
+  openModal('ov-log','<header class="modal-head"><div><div class="eyebrow">'+(isToday?'Today · ':'')+fmtD(_s.date)+'</div><h2>'+(_s.plan&&PLAN[_s.plan]?esc(PLAN[_s.plan].title):(_sEditing?'Edit workout':'What did you train?'))+'</h2></div>'
     +'<button class="circle" onclick="saveLog()" aria-label="Save">'+ic('check')+'</button></header>'
-    +'<label class="lbl" for="log-date">Date</label><input id="log-date" type="date" class="inp" value="'+_s.date+'" max="'+today()+'" onchange="logDate(this.value)">'
     +'<label class="lbl">Quick picks</label><div class="chips scroll">'+quick+'</div>'
     +'<label class="lbl">Muscle groups</label><div class="gtiles">'+tiles+'</div>'
-    +(_s.durationMin?'<p class="hint">'+ic('timer')+' Timer: '+_s.durationMin+' min</p>':'')
+    +(_s.durationMin?'<p class="hint">'+ic('timer')+' Timer: '+_s.durationMin+' min'+(_s.durationCapped?' (capped at 2 hours)':'')+'</p>':'')
+    +'<p class="hint">'+ic('lock')+'You can edit this until the day ends. After that it\'s locked.</p>'
     +(_s.legacy&&_s.legacy.length?'<p class="hint">From the old log: '+esc(_s.legacy.join(', '))+'</p>':'')
-    +'<label class="lbl" for="log-notes">Notes</label><textarea id="log-notes" class="inp" rows="2" placeholder="Optional: how it felt, what to change next time">'+esc(_s.notes)+'</textarea>'
+    +'<label class="lbl" for="log-notes">Notes</label><textarea id="log-notes" class="inp" rows="'+Math.min(7,Math.max(2,Math.ceil((_s.notes||'').length/38)))+'" placeholder="Optional: how it felt, what to change next time">'+esc(_s.notes)+'</textarea>'
     +'<div class="row-btns">'+(_sEditing?'<button class="btn ghost danger-text" onclick="deleteLog()">'+ic('trash')+'Delete</button>':'')+'<button class="btn" onclick="saveLog()">Save workout</button></div>');
 }
 function logKeepNotes(){const n=document.getElementById('log-notes');if(n)_s.notes=n.value}
-function logToggle(k){logKeepNotes();const i=_s.groups.indexOf(k);if(i>=0)_s.groups.splice(i,1);else _s.groups.push(k);buildLog()}
-function logPreset(tk){const t=TEMPLATES.filter(function(x){return x.k===tk})[0];logPresetGroups(t.groups)}
-function logPresetGroups(gs){logKeepNotes();_s.groups=gs.slice();buildLog()}
-function logDate(v){
-  logKeepNotes();
-  if(!v||v>today())return;
-  const ex=getSess().filter(function(s){return s.date===v&&s.id!==_s.id})[0];
-  if(ex){toast('Opened the workout already logged that day');openSess(ex.id);return}
-  _s.date=v;buildLog();
+function logToggle(k){
+  logKeepNotes();const i=_s.groups.indexOf(k);if(i>=0)_s.groups.splice(i,1);else _s.groups.push(k);
+  if(_s.plan&&PLAN[_s.plan]&&sessionKind({groups:_s.groups})!==PLAN[_s.plan].kind)delete _s.plan;
+  // Update in place so the tile transitions instead of the sheet redrawing.
+  const G=GROUP(k),btn=document.querySelector('#ov-log .gtile[data-k="'+k+'"]');
+  if(!btn){buildLog();return}
+  const on=_s.groups.indexOf(k)>=0;
+  btn.classList.toggle('on',on);btn.classList.toggle('t-'+G.tone,on);btn.setAttribute('aria-pressed',on);
+  const tick=btn.querySelector('.tick'),em=btn.querySelector('em');
+  if(on){if(em)em.remove();if(!tick)btn.insertAdjacentHTML('beforeend','<span class="tick">'+ic('check')+'</span>')}
+  else{if(tick)tick.remove();if(btn.dataset.sug==='1'&&!em)btn.insertAdjacentHTML('beforeend','<em>Suggested</em>')}
+  document.querySelectorAll('#ov-log .chips.scroll .chip').forEach(function(c){c.classList.toggle('on',c.dataset.plan===_s.plan)});
+  const h=document.querySelector('#ov-log .modal-head h2');
+  if(h)h.textContent=_s.plan&&PLAN[_s.plan]?PLAN[_s.plan].title:(_sEditing?'Edit workout':'What did you train?');
 }
+function logPreset(key){logKeepNotes();_s.groups=PLAN[key].groups.slice();_s.plan=key;buildLog()}
 function saveLog(){
+  if(isLocked(_s.date)){closeOverlays();toast('That day is locked');return}
   logKeepNotes();
   _s.notes=(_s.notes||'').trim();
   if(!_s.groups.length){toast('Pick at least one group');return}
@@ -349,7 +520,7 @@ function saveLog(){
   toast('Workout saved');rerender();
 }
 function deleteLog(){
-  const id=_s.id;
+  const id=_s.id;if(isLocked(_s.date))return;
   askConfirm('Delete this workout?','This removes it from your history and streak.','Delete',function(){
     putSess(getSess().filter(function(s){return s.id!==id}));_s=null;toast('Deleted');rerender();
   },true);
@@ -364,31 +535,61 @@ function fmtElapsed(ms){
   const t=Math.floor(ms/1000),h=Math.floor(t/3600),m=Math.floor((t%3600)/60),s=t%60;
   return (h?String(h).padStart(2,'0')+':':'')+String(m).padStart(2,'0')+':'+String(s).padStart(2,'0');
 }
-function timerToggle(){getTimer()?stopTimer():startTimer()}
-function startTimer(){sSet('timer',{startTs:Date.now(),date:today()});toast('Timer started');tickTimer();rerender()}
-function stopTimer(){
+// The timer stops itself at TIMER_MAX_MIN (2h) so a forgotten timer can't
+// log a whole day. Checked every second, on boot and when the app returns.
+function timerToggle(){getTimer()?stopTimer(false):startTimer()}
+function startTimer(){sSet('timer',{startTs:Date.now(),date:today()});toast('Timer started. It stops itself at 2 hours');tickTimer();rerender()}
+function timerElapsedMs(t){return Math.min(Date.now()-t.startTs,TIMER_MAX_MIN*60000)}
+function stopTimer(auto){
   const t=getTimer();if(!t)return;
-  const mins=Math.max(1,Math.round((Date.now()-t.startTs)/60000));
-  sSet('timer',null);
+  const mins=Math.max(1,Math.round(timerElapsedMs(t)/60000));
+  sSet('timer',null);clearInterval(_timerInt);
   const all=getSess().slice();
   const s=all.filter(function(x){return x.date===t.date})[0];
-  if(s){s.durationMin=(s.durationMin||0)+mins;putSess(all);toast(mins+' min added to '+sessionLabel(s.groups).toLowerCase());rerender()}
-  else{
+  const lead=auto?'Timer hit 2 hours and stopped. ':'';
+  if(s){
+    s.durationMin=Math.min(TIMER_MAX_MIN,(s.durationMin||0)+mins);if(auto)s.durationCapped=true;
+    putSess(all);toast(lead+sessTitle(s)+': '+s.durationMin+' min');rerender();
+  } else if(!isLocked(t.date)){
     rerender();
-    _s={id:uid(),date:t.date,groups:[],notes:'',durationMin:mins};_sEditing=false;buildLog();
-    toast(mins+' min. Pick what you trained');
+    _s={id:uid(),date:t.date,groups:[],notes:'',durationMin:mins,durationCapped:!!auto};_sEditing=false;buildLog();
+    toast(lead+'Pick what you trained');
+  } else {
+    rerender();toast(lead+'Nothing was logged that day, so the time was dropped');
   }
+}
+function timerCheck(){
+  const t=getTimer();
+  if(t&&Date.now()-t.startTs>=TIMER_MAX_MIN*60000){stopTimer(true);return true}
+  return false;
+}
+function timerPaint(){
+  const t=getTimer();if(!t)return;
+  const ms=timerElapsedMs(t),txt=fmtElapsed(ms);
+  const left=Math.max(0,Math.ceil((TIMER_MAX_MIN*60000-ms)/60000));
+  ['timer-big','side-timer','top-timer-t','home-timer-t'].forEach(function(id){const el=document.getElementById(id);if(el)el.textContent=txt});
+  const hl=document.getElementById('home-timer-left');if(hl)hl.textContent=left+' min until it stops itself';
+  const bar=document.getElementById('home-timer-bar');if(bar)bar.style.width=Math.min(100,ms/(TIMER_MAX_MIN*600))+'%';
 }
 function tickTimer(){
   clearInterval(_timerInt);
-  if(!getTimer()){renderChrome();return}
+  if(timerCheck()||!getTimer()){renderChrome();return}
+  timerPaint();
   _timerInt=setInterval(function(){
-    const t=getTimer();
-    if(!t){clearInterval(_timerInt);renderChrome();return}
-    const txt=fmtElapsed(Date.now()-t.startTs);
-    const big=document.getElementById('timer-big');if(big)big.textContent=txt;
-    const side=document.getElementById('side-timer');if(side)side.textContent=txt;
+    if(!getTimer()){clearInterval(_timerInt);renderChrome();return}
+    if(timerCheck())return;
+    timerPaint();
   },1000);
+}
+document.addEventListener('visibilitychange',function(){if(!document.hidden&&getTimer())tickTimer()});
+function homeTimerCard(){
+  const t=getTimer();if(!t)return '';
+  const ms=timerElapsedMs(t);
+  return '<section class="card timer home-timer running">'
+    +'<div class="ht-main"><div class="eyebrow">Workout running</div><b id="home-timer-t">'+fmtElapsed(ms)+'</b>'
+    +'<small id="home-timer-left">'+Math.max(0,Math.ceil((TIMER_MAX_MIN*60000-ms)/60000))+' min until it stops itself</small>'
+    +'<div class="ht-bar"><i id="home-timer-bar" style="width:'+Math.min(100,ms/(TIMER_MAX_MIN*600))+'%"></i></div></div>'
+    +'<button class="play" onclick="stopTimer(false)" aria-label="Stop timer">'+ic('stop')+'</button></section>';
 }
 
 // ══════════════════════════════════════════════════════
@@ -520,10 +721,10 @@ function reportTraining(){
   const B=BASELINE;
   let md='# SET3 training log\n\nExported '+fmtDLong(today())+' · '+sess.length+' sessions · '+fmtD(sess[0].date)+' to '+fmtD(sess[sess.length-1].date)+'\n\n';
   md+='## Baseline (InBody, June 2026)\n\n- Weight '+B.weight+' kg, target about '+B.target+' kg\n- Body fat '+B.bodyFat+'%, visceral fat level '+B.visceral+'\n- BMR '+B.bmr+' kcal, InBody score '+B.score+'/100, leg muscle '+B.legMuscle.toLowerCase()+'\n\n';
-  md+='## Last 7 days\n\n- Strength days: '+st.strengthDays7+' of '+STRENGTH_DAYS_TARGET+'\n- Cardio sessions: '+st.cardio7+' of '+CARDIO_TARGET+'\n';
+  md+='## Last 7 days\n\n- Strength days: '+st.strengthDays7+' of '+STRENGTH_DAYS_TARGET+'\n- Days with cardio: '+st.cardio7+' of '+CARDIO_TARGET+'\n';
   GROUPS.forEach(function(G){if(G.target)md+='- '+G.label+': '+st.groups[G.k].n7+' of '+G.target+'\n'});
-  md+='\n## Sessions\n\n| Date | Trained | Minutes | Notes |\n|---|---|---|---|\n';
-  sess.forEach(function(s){md+='| '+fmtD(s.date)+' '+s.date.slice(0,4)+' | '+(s.groups||[]).map(function(k){return GROUP(k)?GROUP(k).label:k}).join(', ')+' | '+(s.durationMin||'')+' | '+(s.notes||'').replace(/\|/g,'/').replace(/\n/g,' ')+' |\n'});
+  md+='\n## Sessions\n\n| Date | Session | Trained | Minutes | Notes |\n|---|---|---|---|---|\n';
+  sess.forEach(function(s){md+='| '+fmtD(s.date)+' '+s.date.slice(0,4)+' | '+sessTitle(s)+' | '+(s.groups||[]).map(function(k){return GROUP(k)?GROUP(k).label:k}).join(', ')+' | '+(s.durationMin||'')+' | '+(s.notes||'').replace(/\|/g,'/').replace(/\n/g,' ')+' |\n'});
   if(mets.length){md+='\n## Body measurements\n\n| Date | Weight (kg) | Waist (cm) |\n|---|---|---|\n';mets.forEach(function(m){md+='| '+m.date+' | '+(m.weight||'')+' | '+(m.waist||'')+' |\n'})}
   md+='\n---\nSuggested prompt: "Here is my SET3 training log. Analyse my progress: what\'s improving, what needs attention, and what I should focus on for the next 4 weeks."\n';
   deliver('set3-training-log-'+today()+'.md',md,'text/markdown');
@@ -571,7 +772,7 @@ function openAdd(){
     +listRow('gym','pink','Workout','Pick the muscle groups you trained','closeOverlays();openLog(today())')
     +listRow('daily','yellow','Daily check-in','Sleep, mood, habits, focus','closeOverlays();ckOpen(ckDay())')
     +listRow('scale','green','Body measurement','Weight and waist','closeOverlays();openMet()')
-    +listRow('timer','blue',t?'Stop workout timer':'Start workout timer',t?'Adds the minutes to today':'Counts while the app is closed','closeOverlays();timerToggle()')
+    +listRow('timer','blue',t?'Stop workout timer':'Start workout timer',t?'Adds the minutes to today':'Stops itself at 2 hours','closeOverlays();timerToggle()')
     +'</div>');
 }
 
@@ -581,10 +782,12 @@ function renderChrome(){
   const side=document.getElementById('side-extra');
   if(side){
     const sy=syncText();
-    side.innerHTML=(t?'<button class="side-timer" onclick="go(\'gym\')">'+ic('timer')+'<span id="side-timer">'+fmtElapsed(Date.now()-t.startTs)+'</span></button>':'')
+    side.innerHTML=(t?'<button class="side-timer" onclick="go(\'gym\')">'+ic('timer')+'<span id="side-timer">'+fmtElapsed(timerElapsedMs(t))+'</span></button>':'')
       +'<div class="side-sync">'+ic(sy.icon)+'<span>'+sy.t+'</span></div>';
   }
   const tb=document.getElementById('tab-gym');if(tb)tb.classList.toggle('live',!!t);
+  const tp=document.getElementById('top-timer');
+  if(tp){tp.hidden=!t;if(t){const el=document.getElementById('top-timer-t');if(el)el.textContent=fmtElapsed(timerElapsedMs(t))}}
   const av=document.getElementById('top-avatar');if(av)av.textContent=(getProfile().name||'?').charAt(0).toUpperCase();
 }
 function onSyncChange(changed){if(changed)rerender();else renderChrome()}

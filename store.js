@@ -54,8 +54,21 @@ async function initCloud(){
     snap.docs.forEach(function(d){if(d.exists){const b=d.data();remote[d.id]=b}});
   }catch(e){S.err=(e&&e.code)||'unavailable';S.db=null;S.mode='local';if(typeof onSyncChange==='function')onSyncChange();return}
   let changed=false;
+  // Lists merge item by item so a fresh device (or a seeded session) never
+  // wipes history kept in the account. Everything else: newest copy wins.
+  const MERGE={sessions:'id',daily:'date',mets:'date'};
   KEYS.forEach(function(k){
     const r=remote[k],localAt=S.at[k]||0;
+    if(MERGE[k]&&r&&Array.isArray(r.v)&&Array.isArray(S.cache[k])){
+      const key=MERGE[k],newer=(r.at||0)>=localAt,map={};
+      (newer?S.cache[k]:r.v).forEach(function(x){if(x&&x[key]!=null)map[x[key]]=x});
+      (newer?r.v:S.cache[k]).forEach(function(x){if(x&&x[key]!=null)map[x[key]]=x});
+      const merged=Object.keys(map).map(function(id){return map[id]});
+      const same=JSON.stringify(merged)===JSON.stringify(r.v);
+      S.cache[k]=merged;S.at[k]=same?(r.at||Date.now()):Date.now();lsWrite(k,merged);changed=true;
+      if(!same)cloudWrite(k);
+      return;
+    }
     if(r&&(r.at||0)>=localAt&&r.v!=null){
       S.cache[k]=r.v;S.at[k]=r.at||Date.now();lsWrite(k,r.v);changed=true;
     } else if(S.cache[k]!=null&&(!r||(r.at||0)<localAt)){
@@ -90,16 +103,16 @@ const putProfile=function(p){sSet('profile',p)};
 const BASELINE={date:'2026-06',weight:75.2,bodyFat:38.3,visceral:15,bmr:1372,score:57,legMuscle:'Low',target:60};
 
 // ── Muscle groups ──────────────────────────────────────
-// target = sessions per week. Large groups 2x/week (resistance-training
-// frequency evidence); cardio 3x/week (~150 min at 30–50 min each).
+// target = sessions per week, matching the coach's plan: every strength
+// group twice a week (upper/lower split); cardio on 5 days (finishers count).
 const GROUPS=[
   {k:'legs',label:'Legs & glutes',short:'Legs',icon:'legs',tone:'yellow',target:2,strength:true},
   {k:'back',label:'Back',short:'Back',icon:'back',tone:'blue',target:2,strength:true},
   {k:'chest',label:'Chest',short:'Chest',icon:'chest',tone:'pink',target:2,strength:true},
   {k:'shoulders',label:'Shoulders',short:'Shoulders',icon:'shoulders',tone:'green',target:2,strength:true},
-  {k:'arms',label:'Arms',short:'Arms',icon:'arms',tone:'yellow',target:1,strength:true},
+  {k:'arms',label:'Arms',short:'Arms',icon:'arms',tone:'yellow',target:2,strength:true},
   {k:'core',label:'Core',short:'Core',icon:'core',tone:'blue',target:2,strength:true},
-  {k:'cardio',label:'Cardio',short:'Cardio',icon:'cardio',tone:'pink',target:3,strength:false},
+  {k:'cardio',label:'Cardio',short:'Cardio',icon:'cardio',tone:'pink',target:5,strength:false},
   {k:'mobility',label:'Walk & mobility',short:'Walk',icon:'mobility',tone:'green',target:0,strength:false},
 ];
 const GROUP=function(k){for(let i=0;i<GROUPS.length;i++){if(GROUPS[i].k===k)return GROUPS[i]}return null};
@@ -107,8 +120,14 @@ const GROUP=function(k){for(let i=0;i<GROUPS.length;i++){if(GROUPS[i].k===k)retu
 // ── Migration from the old sets/reps format ────────────
 const EXMAP={"Barbell Bench Press":"chest","Incline Barbell Press":"chest","Decline Barbell Press":"chest","Close-Grip Bench Press":"chest","Dumbbell Bench Press":"chest","Incline Dumbbell Press":"chest","Dumbbell Flyes":"chest","Incline Dumbbell Flyes":"chest","Chest Press Machine":"chest","Pec Fly / Chest Fly Machine":"chest","Iso-Lateral Chest Press":"chest","Seated Chest Press":"chest","Clip Chest":"chest","Smith Machine Bench Press":"chest","Cable Chest Fly (Low)":"chest","Cable Chest Fly (High)":"chest","Push-Up":"chest","Diamond Push-Up":"chest","Dips (Chest Focus)":"chest","Barbell Deadlift":"back","Romanian Deadlift":"back","Barbell Row":"back","T-Bar Row":"back","Rack Pull":"back","Dumbbell Row (Single Arm)":"back","Lat Pulldown":"back","Wide-Grip Lat Pulldown":"back","Seated Cable Row":"back","Straight-Arm Pulldown":"back","Face Pull":"back","Lat Pulldown Machine":"back","Seated Row Machine":"back","Iso-Lateral Back Row":"back","Vertical Row Machine":"back","45\u00b0 Back Extension":"back","Pull-Up":"back","Chin-Up":"back","Barbell Overhead Press":"shoulders","Shrugs (Barbell)":"shoulders","Upright Row (Barbell)":"shoulders","Dumbbell Shoulder Press":"shoulders","Arnold Press":"shoulders","Lateral Raise (Dumbbell)":"shoulders","Front Raise (Dumbbell)":"shoulders","Rear Delt Fly (Dumbbell)":"shoulders","Shrugs (Dumbbell)":"shoulders","Lateral Raise (Cable)":"shoulders","Rear Delt Fly (Cable)":"shoulders","Reverse Pec Deck":"shoulders","Shoulder Press Machine":"shoulders","Lateral Raise Machine":"shoulders","Barbell Curl":"arms","EZ Bar Curl":"arms","Reverse Curl":"arms","Dumbbell Curl":"arms","Hammer Curl":"arms","Concentration Curl":"arms","Incline Dumbbell Curl":"arms","Cable Curl":"arms","Preacher Curl":"arms","Machine Bicep Curl":"arms","Tricep Pushdown (Bar)":"arms","Tricep Pushdown (Rope)":"arms","Overhead Tricep Extension":"arms","Skull Crusher":"arms","Tricep Kickback":"arms","Tricep Machine":"arms","Tricep Dips (Bench)":"arms","Barbell Back Squat":"legs","Barbell Front Squat":"legs","Hip Thrust (Barbell)":"legs","Goblet Squat":"legs","Sumo Squat (Dumbbell)":"legs","Dumbbell Squat":"legs","Bulgarian Split Squat":"legs","Lunge (Dumbbell)":"legs","Walking Lunge":"legs","Romanian Deadlift (Dumbbell)":"legs","Leg Press":"legs","Leg Extension":"legs","Hack Squat Machine":"legs","Seated Leg Curl":"legs","Lying Leg Curl":"legs","Hip Thrust (Machine)":"legs","Abductor Machine":"legs","Adductor Machine":"legs","Smith Machine Squat":"legs","Glute Bridge":"legs","Wall Sit":"legs","Standing Calf Raise":"legs","Seated Calf Raise":"legs","Stepper Calf Raise":"legs","Leg Press Calf Press":"legs","Crunch":"core","Reverse Crunch":"core","Bicycle Crunch":"core","Leg Raise (Lying)":"core","Hanging Leg Raise":"core","Plank":"core","Side Plank":"core","Russian Twist":"core","Dead Bug":"core","Mountain Climber":"core","Cable Crunch":"core","Machine Crunch":"core","Hollow Body Hold":"core","Treadmill Walk":"cardio","Treadmill Run":"cardio","Treadmill Incline Walk":"cardio","Stationary Bike":"cardio","Elliptical":"cardio","Rowing Machine":"cardio","Stairmaster / StepMill":"cardio","Assault Bike":"cardio","Jump Rope":"cardio","Burpee":"cardio","High Knees":"cardio","Box Jump":"cardio","Clean and Press":"full","Power Clean":"full","Thruster":"full","Kettlebell Swing":"full","Turkish Get-Up":"full","Wall Ball":"full","Medicine Ball Slam":"full","TRX Row":"full","TRX Push-Up":"full","Battle Ropes":"full","Farmer's Walk":"full","Wrist Curl":"arms","Reverse Wrist Curl":"arms","Dead Hang":"arms","Hip Flexor Stretch":"mobility","Pigeon Pose":"mobility","Hamstring Stretch":"mobility","Quad Stretch":"mobility","Calf Stretch":"mobility","Cat-Cow":"mobility","Child's Pose":"mobility","Cobra Pose":"mobility","Doorway Chest Stretch":"mobility","Foam Roll \u2014 Quads":"mobility","Diaphragmatic Breathing":"mobility"};
 const TYPE_TO_GROUPS={upper:['chest','back','shoulders','arms'],lower:['legs'],cardio:['cardio'],core:['cardio','core'],rest:['mobility'],other:[]};
+const TIMER_MAX_MIN=120;
+// Sessions shared from exported logs, added if that day is missing.
+const SEED_SESSIONS=[
+  {id:'log-2026-10-26',date:'2026-10-26',plan:'full',groups:['back','chest','core','cardio','legs'],durationMin:120,durationCapped:true,
+   notes:'Comeback day after 2-week break. Hip thrust, leg curl, leg press (iso, 10kg/side), lat pulldown, chest press, rear delt fly, dead bugs, plank. Treadmill 15 min, incline 3–4. Light loads, felt good. Leg extension skipped — add back next leg day.'},
+];
 function migrateSessions(){
-  const all=sGet('sessions',null);if(!all)return;
+  const all=sGet('sessions',null)||[];
   let changed=false;
   all.forEach(function(s){
     if(Array.isArray(s.groups))return;
@@ -124,6 +143,12 @@ function migrateSessions(){
     if(s.exercises&&s.exercises.length)s.legacy=s.exercises.map(function(e){return e.n});
     delete s.exercises;delete s.type;
     changed=true;
+  });
+  all.forEach(function(s){
+    if(s.durationMin>TIMER_MAX_MIN){s.durationMin=TIMER_MAX_MIN;s.durationCapped=true;changed=true}
+  });
+  SEED_SESSIONS.forEach(function(seed){
+    if(!all.some(function(s){return s.date===seed.date})){all.push(JSON.parse(JSON.stringify(seed)));changed=true}
   });
   if(changed){S.cache.sessions=all;S.at.sessions=Date.now();lsWrite('sessions',all);lsWrite('__at',S.at);cloudWrite('sessions')}
 }
