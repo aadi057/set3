@@ -129,6 +129,10 @@ const SEED_SESSIONS=[
    exercises:SEED_EX_1026,
    notes:'Comeback day after 2-week break. Hip thrust, leg curl, leg press (iso, 10kg/side), lat pulldown, chest press, rear delt fly, dead bugs, plank. Treadmill 15 min, incline 3–4. Light loads, felt good. Leg extension skipped — add back next leg day.'},
 ];
+// 27 Oct was an outdoor walk (7,719 steps) on a travel day, logged as cardio.
+const SESSION_FIXES=[
+  {id:'walk-1027',date:'2026-10-27',set:{plan:'light',groups:['mobility'],exercises:['Easy Walk'],notes:'Walk 7719 steps'}},
+];
 function migrateSessions(){
   const all=sGet('sessions',null)||[];
   let changed=false;
@@ -159,6 +163,15 @@ function migrateSessions(){
       seed.groups.forEach(function(g){if(have.groups.indexOf(g)<0)have.groups.push(g)});
       changed=true;
     }
+  });
+  // One-off corrections Aadi asked for. Each runs once per session (marked
+  // with s.fix) so later edits in the app are never overwritten.
+  SESSION_FIXES.forEach(function(f){
+    all.forEach(function(s){
+      if(s.date!==f.date||(s.fixes||[]).indexOf(f.id)>=0)return;
+      Object.keys(f.set).forEach(function(k){s[k]=JSON.parse(JSON.stringify(f.set[k]))});
+      s.fixes=(s.fixes||[]).concat(f.id);changed=true;
+    });
   });
   if(changed){S.cache.sessions=all;S.at.sessions=Date.now();lsWrite('sessions',all);lsWrite('__at',S.at);cloudWrite('sessions')}
 }
