@@ -493,8 +493,9 @@ function openPlanDay(date){
   if(st.mode==='session'){
     const s=st.session,P=s.plan&&PLAN[s.plan];
     const label=st.confirmed?'What you did':(P?'Coach\'s plan · not confirmed':'Exercises');
-    openSheet(head(fmtDLong(date)+' · done',sessTitle(s),P?P.sub:'',P?P.tone:'green','check')
+    openSheet(head(fmtDLong(date)+' · done',sessTitle(s),P&&sessTitle(s)===P.title?P.sub:'',P?P.tone:'green','check')
       +chips(s.groups||[])
+      +(activityText(s)?'<p class="hint">'+ic('mobility')+' '+activityText(s)+(walkCounts(s)?' · counted as a cardio day':'')+'</p>':'')
       +(s.notes?'<p class="note-block" style="margin-top:12px">'+esc(s.notes)+'</p>':'')
       +'<label class="lbl">'+label+'</label>'+(st.list.length||P?exRows(st.list,s.plan,st.confirmed):'<p class="hint">No exercises saved for this day.</p>')
       +(!st.confirmed&&P&&st.editable?'<p class="hint">'+ic('info')+'Hold a muscle group to swap in what you actually did.</p>':'')
@@ -622,6 +623,7 @@ function sessRow(s){
   const extra=[];
   if(Array.isArray(s.exercises)&&s.exercises.length)extra.push(s.exercises.length+' exercise'+(s.exercises.length>1?'s':''));
   if(s.durationMin)extra.push(s.durationMin+' min');
+  if(activityText(s))extra.push(activityText(s));
   if(s.legacy&&s.legacy.length)extra.push(s.legacy.length+' exercises in old log');
   return '<button class="row sess" onclick="openSess(\''+s.id+'\')"><span class="dot t-'+G.tone+'">'+ic(G.icon)+'</span>'
     +'<span class="row-main"><small>'+fmtD(s.date)+'</small><b>'+esc(sessTitle(s))+'</b>'
@@ -666,6 +668,7 @@ function buildLockedLog(){
     +'<button class="circle" onclick="closeOverlays()" aria-label="Close">'+ic('x')+'</button></header>'
     +'<div class="chips wrap">'+(s.groups||[]).map(groupChip).join('')+'</div>'
     +(s.durationMin?'<p class="hint">'+ic('timer')+' '+s.durationMin+' min'+(s.durationCapped?' (timer capped at 2 hours)':'')+'</p>':'')
+    +(activityText(s)?'<p class="hint">'+ic('mobility')+' '+activityText(s)+(walkCounts(s)?' · counted as a cardio day':'')+'</p>':'')
     +(Array.isArray(s.exercises)&&s.exercises.length?'<label class="lbl">What you did</label>'+exRows(s.exercises,s.plan,true):'')
     +(s.notes?'<label class="lbl">Notes</label><p class="note-block">'+esc(s.notes)+'</p>':'')
     +(s.legacy&&s.legacy.length?'<p class="hint">From the old log: '+esc(s.legacy.join(', '))+'</p>':'')
@@ -692,10 +695,27 @@ function buildLog(){
     +(_s.durationMin?'<p class="hint">'+ic('timer')+' Timer: '+_s.durationMin+' min'+(_s.durationCapped?' (capped at 2 hours)':'')+'</p>':'')
     +'<p class="hint">'+ic('lock')+'You can edit this until the day ends. After that it\'s locked.</p>'
     +(_s.legacy&&_s.legacy.length?'<p class="hint">From the old log: '+esc(_s.legacy.join(', '))+'</p>':'')
+    +'<div class="two"><div><label class="lbl" for="log-steps">Steps</label><input id="log-steps" class="inp" inputmode="numeric" placeholder="Optional" value="'+(_s.steps||'')+'"></div>'
+    +'<div><label class="lbl" for="log-kcal">Calories burned</label><input id="log-kcal" class="inp" inputmode="numeric" placeholder="Optional" value="'+(_s.kcal||'')+'"></div></div>'
+    +'<p class="hint">'+ic('info')+'A walk day with '+WALK_STEPS_CARDIO.toLocaleString('en-IN')+'+ steps counts as a cardio day.</p>'
     +'<label class="lbl" for="log-notes">Notes</label><textarea id="log-notes" class="inp" rows="'+Math.min(7,Math.max(2,Math.ceil((_s.notes||'').length/38)))+'" placeholder="Optional: how it felt, what to change next time">'+esc(_s.notes)+'</textarea>'
     +'<div class="row-btns">'+(_sEditing?'<button class="btn ghost danger-text" onclick="deleteLog()">'+ic('trash')+'Delete</button>':'')+'<button class="btn" onclick="saveLog()">Save workout</button></div>');
 }
-function logKeepNotes(){const n=document.getElementById('log-notes');if(n)_s.notes=n.value}
+function logKeepNotes(){
+  const n=document.getElementById('log-notes');if(n)_s.notes=n.value;
+  [['log-steps','steps'],['log-kcal','kcal']].forEach(function(f){
+    const el=document.getElementById(f[0]);if(!el)return;
+    const v=parseInt(String(el.value).replace(/[^0-9]/g,''),10);
+    if(v>0)_s[f[1]]=v;else delete _s[f[1]];
+  });
+}
+// "8,108 steps · 2,288 kcal" for a session, or ''.
+function activityText(s){
+  const p=[];
+  if(s.steps)p.push(s.steps.toLocaleString('en-IN')+' steps');
+  if(s.kcal)p.push(s.kcal.toLocaleString('en-IN')+' kcal');
+  return p.join(' · ');
+}
 function logExSummary(){
   const st=pickState('log');
   if(!st.list.length)return '<p class="hint">None picked. Hold a muscle group above to choose its exercises.</p>';
@@ -942,8 +962,8 @@ function reportTraining(){
   md+='## Baseline (InBody, June 2026)\n\n- Weight '+B.weight+' kg, target about '+B.target+' kg\n- Body fat '+B.bodyFat+'%, visceral fat level '+B.visceral+'\n- BMR '+B.bmr+' kcal, InBody score '+B.score+'/100, leg muscle '+B.legMuscle.toLowerCase()+'\n\n';
   md+='## Last 7 days\n\n- Strength days: '+st.strengthDays7+' of '+STRENGTH_DAYS_TARGET+'\n- Days with cardio: '+st.cardio7+' of '+CARDIO_TARGET+'\n';
   GROUPS.forEach(function(G){if(G.target)md+='- '+G.label+': '+st.groups[G.k].n7+' of '+G.target+'\n'});
-  md+='\n## Sessions\n\n| Date | Session | Trained | Exercises | Minutes | Notes |\n|---|---|---|---|---|---|\n';
-  sess.forEach(function(s){md+='| '+fmtD(s.date)+' '+s.date.slice(0,4)+' | '+sessTitle(s)+' | '+(s.groups||[]).map(function(k){return GROUP(k)?GROUP(k).label:k}).join(', ')+' | '+(Array.isArray(s.exercises)?s.exercises.join(', '):'')+' | '+(s.durationMin||'')+' | '+(s.notes||'').replace(/\|/g,'/').replace(/\n/g,' ')+' |\n'});
+  md+='\n## Sessions\n\n| Date | Session | Trained | Exercises | Minutes | Steps | Notes |\n|---|---|---|---|---|---|---|\n';
+  sess.forEach(function(s){md+='| '+fmtD(s.date)+' '+s.date.slice(0,4)+' | '+sessTitle(s)+' | '+(s.groups||[]).map(function(k){return GROUP(k)?GROUP(k).label:k}).join(', ')+' | '+(Array.isArray(s.exercises)?s.exercises.join(', '):'')+' | '+(s.durationMin||'')+' | '+(s.steps||'')+' | '+(s.notes||'').replace(/\|/g,'/').replace(/\n/g,' ')+' |\n'});
   if(mets.length){md+='\n## Body measurements\n\n| Date | Weight (kg) | Waist (cm) |\n|---|---|---|\n';mets.forEach(function(m){md+='| '+m.date+' | '+(m.weight||'')+' | '+(m.waist||'')+' |\n'})}
   md+='\n---\nSuggested prompt: "Here is my SET3 training log. Analyse my progress: what\'s improving, what needs attention, and what I should focus on for the next 4 weeks."\n';
   deliver('set3-training-log-'+today()+'.md',md,'text/markdown');

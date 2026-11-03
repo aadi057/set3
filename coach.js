@@ -12,11 +12,16 @@
 //  1. Six training days in a row → rest.
 //  2. Your declared rest day → rest (walk optional).
 //  3. Under 5.5h sleep in today's check-in → light day.
-//  4. Nothing logged, or 7+ days off → lighter full-body day.
+//  4. No strength day yet, or 7+ days since the last one → lighter full-body
+//     day. (Walks don't count here: they don't keep muscles trained.)
 //  5. Lifted on each of the last two days → cardio day (long one on weekends).
-//  6. Four strength days already this week → cardio (or rest if cardio is met).
+//  6. Four strength days already this week (Mon–Sun) → cardio, or rest once
+//     cardio is met too. Counting by calendar week keeps one easy day in
+//     every week instead of letting lifts spill into Sunday.
 //  7. Otherwise the next strength day in the rotation, unless its muscles
 //     were trained under 48h ago (then the other half, else cardio).
+// Big walk days (6,000+ steps, or 30+ min) count as cardio days: an 8,000-step
+// day is roughly an hour of moderate activity, the kind the WHO counts.
 // Missed a day? Nothing breaks; the rotation just continues.
 // ══════════════════════════════════════════════════════
 const STRENGTH_DAYS_TARGET=4;   // per 7 days
@@ -71,6 +76,13 @@ function doseFor(name,key){
   return genericDose(name);
 }
 const STRENGTH_KEYS=['lowerA','upperA','lowerB','upperB','full'];
+const WALK_STEPS_CARDIO=6000;   // a walk day with this many steps counts as cardio
+function walkCounts(s){
+  const g=s.groups||[];
+  return g.indexOf('mobility')>=0&&((s.steps||0)>=WALK_STEPS_CARDIO||(s.durationMin||0)>=30);
+}
+function hasCardio(s){return (s.groups||[]).indexOf('cardio')>=0||walkCounts(s)}
+function weekStart(iso){const d=new Date(iso+'T00:00:00');return addDays(iso,-((d.getDay()+6)%7))}
 
 // ── Reading your history ──────────────────────────────
 function sessionKind(s){
@@ -87,6 +99,7 @@ function sessionKind(s){
 }
 function isStrength(s){const k=sessionKind(s);return k==='lower'||k==='upper'||k==='full'}
 function sessTitle(s){
+  if(s.plan==='light'||s.plan==='rest')return sessionLabel(s.groups);
   if(s.plan&&PLAN[s.plan])return PLAN[s.plan].title;
   return sessionLabel(s.groups);
 }
@@ -96,12 +109,15 @@ function coachStats(asOf,list){
   const from7=addDays(asOf,-7);
   const st={groups:{},lastAny:null,gap:null,run:0,strengthDays7:0,cardio7:0,lastStrength:null,byDate:{}};
   GROUPS.forEach(function(g){st.groups[g.k]={last:null,since:null,n7:0}});
-  const strengthDays={},cardioDays={},trainDays={};
+  const strengthDays={},cardioDays={},trainDays={},wkStrength={},wkCardio={};
+  const wkStart=weekStart(asOf);
   past.forEach(function(s){
     const gs=s.groups||[];
     if(!gs.length)return;
     st.byDate[s.date]=s;
-    gs.forEach(function(k){
+    const counted=gs.slice();
+    if(walkCounts(s)&&counted.indexOf('cardio')<0)counted.push('cardio');
+    counted.forEach(function(k){
       const g=st.groups[k];if(!g)return;
       if(!g.last||s.date>g.last)g.last=s.date;
       if(s.date>=from7)g.n7++;
@@ -110,7 +126,8 @@ function coachStats(asOf,list){
       if(s.date>=from7)strengthDays[s.date]=1;
       if(!st.lastStrength||s.date>st.lastStrength.date)st.lastStrength=s;
     }
-    if(s.date>=from7&&gs.indexOf('cardio')>=0)cardioDays[s.date]=1;
+    if(s.date>=from7&&hasCardio(s))cardioDays[s.date]=1;
+    if(s.date>=wkStart){if(isStrength(s))wkStrength[s.date]=1;if(hasCardio(s))wkCardio[s.date]=1}
     if(gs.some(function(k){return k!=='mobility'}))trainDays[s.date]=1;
     if(!st.lastAny||s.date>st.lastAny)st.lastAny=s.date;
   });
@@ -118,11 +135,16 @@ function coachStats(asOf,list){
   if(st.lastAny)st.gap=daysBetween(st.lastAny,asOf);
   st.strengthDays7=Object.keys(strengthDays).length;
   st.cardio7=Object.keys(cardioDays).length;
+  st.strengthWeek=Object.keys(wkStrength).length;
+  st.cardioWeek=Object.keys(wkCardio).length;
+  st.daysLeft=7-daysBetween(wkStart,asOf);   // including today
+  st.strengthGap=st.lastStrength?daysBetween(st.lastStrength.date,asOf):null;
   let d=addDays(asOf,-1);
   while(trainDays[d]){st.run++;d=addDays(d,-1)}
   const y1=st.byDate[addDays(asOf,-1)],y2=st.byDate[addDays(asOf,-2)];
   st.lifted1=!!(y1&&isStrength(y1));
   st.lifted2=!!(y2&&isStrength(y2));
+  st.walk1=y1&&walkCounts(y1)?y1:null;
   return st;
 }
 // Which variant (A/B) of a lower or upper day comes next.
@@ -155,10 +177,12 @@ function recommend(asOf,list){
   const dow=new Date(asOf+'T00:00:00').getDay();
   const weekend=dow===0||dow===6;
   const sleep=coachSleep(asOf);
-  const weekLine='Last 7 days: '+st.strengthDays7+' of '+STRENGTH_DAYS_TARGET+' strength days, cardio on '+st.cardio7+' of '+CARDIO_TARGET+' days.';
+  const weekLine='This week: '+st.strengthWeek+' of '+STRENGTH_DAYS_TARGET+' strength days, cardio on '+st.cardioWeek+' of '+CARDIO_TARGET+' days.';
+  const walkLine=st.walk1?'Yesterday\'s walk'+(st.walk1.steps?' ('+st.walk1.steps.toLocaleString('en-IN')+' steps)':'')+' counts as a cardio day. Walking isn\'t leg training, so your legs are fresh.':null;
+  const withWalk=function(r){if(walkLine)r.splice(Math.min(1,r.length),0,walkLine);return r};
   function out(key,reasons){
     const P=PLAN[key];
-    return {key:key,plan:P,kind:P.kind,title:P.title,sub:P.sub,groups:P.groups.slice(),reasons:reasons,stats:st,asOf:asOf};
+    return {key:key,plan:P,kind:P.kind,title:P.title,sub:P.sub,groups:P.groups.slice(),reasons:withWalk(reasons),stats:st,asOf:asOf};
   }
   function cardioDay(lead){
     return out(weekend?'long':'cardio',[lead,'Cardio is the biggest lever on visceral fat, and yours started at level '+BASELINE.visceral+'.',weekLine]);
@@ -167,13 +191,14 @@ function recommend(asOf,list){
   if(st.run>=6)return out('rest',['You\'ve trained '+st.run+' days in a row. Strength is built while you recover, so the plan has one full rest day a week.','A short walk is fine if you want to move.']);
   if(getRestDays().indexOf(dow)>=0)return out('rest',['Today is one of your rest days. A walk still counts toward your morning movement habit.',weekLine]);
   if(sleep!=null&&sleep<5.5)return out('light',['You slept '+(Math.round(sleep*10)/10)+'h. Short sleep cuts strength and raises injury risk, so lifting heavy today costs more than it gives.','An easy walk still counts as activity, and the plan picks up again tomorrow.']);
-  if(!st.lastAny||st.gap>=7){
-    return out('full',[st.lastAny?'It\'s been '+st.gap+' days since your last session. A lighter full-body day restarts every muscle without heavy soreness.':'Nothing logged yet. A lighter full-body day is the standard way to start.','Keep 3–4 reps in the tank today. The full plan starts from your next session.']);
+  if(!st.lastStrength||st.strengthGap>=7){
+    return out('full',[st.lastStrength?'It\'s been '+st.strengthGap+' days since your last strength session. A lighter full-body day restarts every muscle without heavy soreness.':'No strength session logged yet. A lighter full-body day is the standard way to start.','Keep 3–4 reps in the tank today. The full plan starts from your next session.']);
   }
+  if(st.strengthWeek>=STRENGTH_DAYS_TARGET&&st.cardioWeek>=CARDIO_TARGET)
+    return out('rest',['Strength and cardio targets are both met for the week. Rest, or take an easy walk. Muscle is rebuilt on rest days.',weekLine]);
   if(st.lifted1&&st.lifted2)return cardioDay('You lifted on each of the last two days. A cardio day lets those muscles recover while you keep burning fat.');
-  if(st.strengthDays7>=STRENGTH_DAYS_TARGET){
-    if(st.cardio7<CARDIO_TARGET)return cardioDay('You\'ve done '+st.strengthDays7+' strength days in the last week, which is the plan. Today goes to cardio.');
-    return out('rest',['Strength and cardio targets are both met for the week. Rest, or take an easy walk.']);
+  if(st.strengthWeek>=STRENGTH_DAYS_TARGET){
+    return cardioDay('You\'ve done '+st.strengthWeek+' strength days this week, which is the plan. Today goes to cardio.');
   }
 
   const last=st.lastStrength,lastKind=last?sessionKind(last):null;
@@ -258,6 +283,6 @@ const GROUP_INFO={
   shoulders:{what:'Front, side and rear delts.',why:'Side and rear delts give width and protect the shoulder joint. Rear delt flys count here.',moves:['Shoulder press machine','Lateral raises','Rear delt fly','Face pull']},
   arms:{what:'Biceps, triceps and forearms.',why:'They already work on every upper day; a couple of direct sets each finish the job.',moves:['Dumbbell or cable curl','Hammer curl','Triceps pushdown','Overhead triceps extension']},
   core:{what:'Abs, obliques and the deep muscles that brace your spine.',why:'Supports every heavy lift and your lower back during long sitting.',moves:['Dead bug','Plank','Side plank','Cable crunch']},
-  cardio:{what:'Anything that keeps your heart rate up: incline walking, cycling, rowing.',why:'The main lever on visceral fat, which started at level 15. The plan puts some in on 5–6 days a week.',moves:['Incline treadmill walk','Cycling','Rowing','Outdoor walk']},
+  cardio:{what:'Anything that keeps your heart rate up: incline walking, cycling, rowing.',why:'The main lever on visceral fat, which started at level 15. The plan puts some in on 5–6 days a week. Walk days with 6,000+ steps count here too.',moves:['Incline treadmill walk','Cycling','Rowing','Outdoor walk']},
   mobility:{what:'Easy walks, stretching and mobility work.',why:'Counts toward your morning movement habit and helps recovery between hard days.',moves:['20–30 min outdoor walk','Hip flexor stretch','Cat-cow','Foam rolling']},
 };

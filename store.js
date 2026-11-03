@@ -128,10 +128,13 @@ const SEED_SESSIONS=[
   {id:'log-2026-10-26',date:'2026-10-26',plan:'full',groups:['back','chest','core','cardio','legs','shoulders'],durationMin:120,durationCapped:true,
    exercises:SEED_EX_1026,
    notes:'Comeback day after 2-week break. Hip thrust, leg curl, leg press (iso, 10kg/side), lat pulldown, chest press, rear delt fly, dead bugs, plank. Treadmill 15 min, incline 3–4. Light loads, felt good. Leg extension skipped — add back next leg day.'},
+  {id:'walk-2026-11-02',date:'2026-11-02',plan:'light',groups:['mobility'],exercises:['Easy Walk'],steps:8108,kcal:2288,
+   notes:'No gym. Big outdoor day: about 8,100 steps and active on my feet all day.'},
 ];
 // 27 Oct was an outdoor walk (7,719 steps) on a travel day, logged as cardio.
 const SESSION_FIXES=[
   {id:'walk-1027',date:'2026-10-27',set:{plan:'light',groups:['mobility'],exercises:['Easy Walk'],notes:'Walk 7719 steps'}},
+  {id:'steps-1027',date:'2026-10-27',set:{steps:7719}},
 ];
 function migrateSessions(){
   const all=sGet('sessions',null)||[];
