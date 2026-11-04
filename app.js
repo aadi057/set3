@@ -119,7 +119,7 @@ document.addEventListener('contextmenu',function(e){
 function pickState(ctx){
   if(ctx==='log'){
     const defs=_s.plan?planDefaults(_s.plan):[];
-    return {mode:'log',date:_s.date,key:_s.plan||null,list:Array.isArray(_s.exercises)?_s.exercises.slice():defs.filter(function(n){return _s.groups.indexOf(exGroup(n))>=0}),defaults:defs,editable:!isLocked(_s.date),confirmed:Array.isArray(_s.exercises)};
+    return {mode:'log',date:_s.date,key:_s.plan||null,list:Array.isArray(_s.exercises)?_s.exercises.slice():defs.filter(function(n){return _s.groups.indexOf(exGroup(n))>=0}),defaults:defs,editable:!logLocked(),confirmed:Array.isArray(_s.exercises)};
   }
   const date=ctx;
   const s=getSess().filter(function(x){return x.date===date&&(x.groups||[]).length})[0];
@@ -636,26 +636,30 @@ function sessRow(s){
 // ══════════════════════════════════════════════════════
 // WORKOUT LOGGER — pick what you trained, that's it
 // ══════════════════════════════════════════════════════
-let _s=null,_sEditing=false;
+let _s=null,_sEditing=false,_sOrigDate=null;
+const BACKFILL_DAYS=7;   // how far back a missed workout can be logged
 // A day locks once it's over (4am the next morning, same as check-ins).
 function isLocked(date){return date<ckDay()}
+// A saved workout locks once its day is over. A new one can still be dated
+// up to a week back, for days you forgot to log.
+function logLocked(){return !!(_sOrigDate&&isLocked(_sOrigDate))}
 function openLog(date,preset,planKey,exercises){
   const ex=getSess().filter(function(s){return s.date===date})[0];
   if(isLocked(date)){
     if(ex){openSess(ex.id);return}
-    toast(fmtD(date)+' is over, so it can\'t be logged now');return;
+    if(daysBetween(date,today())>BACKFILL_DAYS){toast(fmtD(date)+' is too far back to log');return}
   }
   if(ex&&!preset){openSess(ex.id);return}
   _s=ex?JSON.parse(JSON.stringify(ex)):{id:uid(),date:date,groups:[],notes:''};
   if(preset)_s.groups=preset.slice();
   if(planKey)_s.plan=planKey;
   if(exercises)_s.exercises=exercises.slice();
-  _sEditing=!!ex;
+  _sEditing=!!ex;_sOrigDate=ex?ex.date:null;
   buildLog();
 }
 function openSess(id){
   const f=getSess().filter(function(s){return s.id===id})[0];if(!f)return;
-  _s=JSON.parse(JSON.stringify(f));_sEditing=true;buildLog();
+  _s=JSON.parse(JSON.stringify(f));_sEditing=true;_sOrigDate=f.date;buildLog();
 }
 function logFromRec(){
   const r=recommend(today()),st=pickState(today());
@@ -676,9 +680,9 @@ function buildLockedLog(){
     +'<div class="row-btns"><button class="btn" onclick="closeOverlays()">Close</button></div>');
 }
 function buildLog(){
-  if(isLocked(_s.date)){buildLockedLog();return}
+  if(logLocked()){buildLockedLog();return}
   const isToday=_s.date===today();
-  const rec=isToday?recommend(_s.date):null;
+  const rec=recommend(_s.date);
   const sug=rec?rec.groups:[];
   const quick=['lowerA','upperA','lowerB','upperB','full','cardio','long'].map(function(k){return '<button class="chip'+(_s.plan===k?' on':'')+'" data-plan="'+k+'" onclick="logPreset(\''+k+'\')">'+PLAN[k].title+'</button>'}).join('');
   const tiles=GROUPS.map(function(G){
@@ -689,6 +693,7 @@ function buildLog(){
   }).join('');
   openModal('ov-log','<header class="modal-head"><div><div class="eyebrow">'+(isToday?'Today · ':'')+fmtD(_s.date)+'</div><h2>'+(_s.plan&&PLAN[_s.plan]?esc(PLAN[_s.plan].title):(_sEditing?'Edit workout':'What did you train?'))+'</h2></div>'
     +'<button class="circle" onclick="saveLog()" aria-label="Save">'+ic('check')+'</button></header>'
+    +'<label class="lbl" for="log-date">Date</label><input id="log-date" type="date" class="inp" value="'+_s.date+'" min="'+addDays(today(),-BACKFILL_DAYS)+'" max="'+today()+'" onchange="logSetDate(this.value)">'
     +'<label class="lbl">Quick picks</label><div class="chips scroll">'+quick+'</div>'
     +'<label class="lbl">Muscle groups <span class="lbl-tag">hold one to pick exercises</span></label><div class="gtiles">'+tiles+'</div>'
     +'<label class="lbl">Exercises</label><div id="log-ex">'+logExSummary()+'</div>'
@@ -745,8 +750,20 @@ function logToggle(k){
   if(h)h.textContent=_s.plan&&PLAN[_s.plan]?PLAN[_s.plan].title:(_sEditing?'Edit workout':'What did you train?');
 }
 function logPreset(key){logKeepNotes();_s.groups=PLAN[key].groups.slice();_s.plan=key;_s.exercises=planDefaults(key);buildLog()}
+// Move the workout being logged to another day (today or up to a week back).
+function logSetDate(v){
+  const el=document.getElementById('log-date');
+  const back=function(msg){toast(msg);if(el)el.value=_s.date};
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(v||''))return back('Pick a date');
+  if(v>today())return back('That day hasn\'t happened yet');
+  if(daysBetween(v,today())>BACKFILL_DAYS)return back('You can go back up to '+BACKFILL_DAYS+' days');
+  if(dayTaken(v))return back(fmtD(v)+' already has a workout. Open it from History to edit.');
+  logKeepNotes();_s.date=v;buildLog();
+}
+function dayTaken(date){return getSess().some(function(s){return s.date===date&&s.id!==_s.id})}
 function saveLog(){
-  if(isLocked(_s.date)){closeOverlays();toast('That day is locked');return}
+  if(logLocked()){closeOverlays();toast('That day is locked');return}
+  if(dayTaken(_s.date)){toast(fmtD(_s.date)+' already has a workout');return}
   logKeepNotes();
   _s.notes=(_s.notes||'').trim();
   if(!_s.groups.length){toast('Pick at least one group');return}
@@ -759,7 +776,7 @@ function saveLog(){
   toast('Workout saved');rerender();
 }
 function deleteLog(){
-  const id=_s.id;if(isLocked(_s.date))return;
+  const id=_s.id;if(logLocked())return;
   askConfirm('Delete this workout?','This removes it from your history and streak.','Delete',function(){
     putSess(getSess().filter(function(s){return s.id!==id}));_s=null;toast('Deleted');rerender();
   },true);
@@ -791,7 +808,7 @@ function stopTimer(auto){
     putSess(all);toast(lead+sessTitle(s)+': '+s.durationMin+' min');rerender();
   } else if(!isLocked(t.date)){
     rerender();
-    _s={id:uid(),date:t.date,groups:[],notes:'',durationMin:mins,durationCapped:!!auto};_sEditing=false;buildLog();
+    _s={id:uid(),date:t.date,groups:[],notes:'',durationMin:mins,durationCapped:!!auto};_sEditing=false;_sOrigDate=null;buildLog();
     toast(lead+'Pick what you trained');
   } else {
     rerender();toast(lead+'Nothing was logged that day, so the time was dropped');

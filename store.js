@@ -83,7 +83,10 @@ async function initCloud(){
 
 // ── Dates ──────────────────────────────────────────────
 const localISO=function(d){return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')};
-const today=function(){return localISO(new Date())};
+// The app's day runs until 4am, same as check-ins and the lock, so a workout
+// logged at 12:30am still lands on the day you trained.
+const DAY_ROLLOVER_H=4;
+const today=function(){const d=new Date();if(d.getHours()<DAY_ROLLOVER_H)d.setDate(d.getDate()-1);return localISO(d)};
 function addDays(iso,n){const d=new Date(iso+'T00:00:00');d.setDate(d.getDate()+n);return localISO(d)}
 function daysBetween(a,b){return Math.round((new Date(b+'T00:00:00')-new Date(a+'T00:00:00'))/86400000)}
 const uid=function(){return Date.now().toString(36)+Math.random().toString(36).slice(2)};
@@ -136,6 +139,7 @@ const SESSION_FIXES=[
   {id:'walk-1027',date:'2026-10-27',set:{plan:'light',groups:['mobility'],exercises:['Easy Walk'],notes:'Walk 7719 steps'}},
   {id:'steps-1027',date:'2026-10-27',set:{steps:7719}},
 ];
+const UPPER_B_1104=['Lat Pulldown','Incline Dumbbell Press','Dumbbell Row (Single Arm)','Lateral Raise (Dumbbell)','Face Pull','Hammer Curl','Overhead Tricep Extension','Treadmill Incline Walk'];
 function migrateSessions(){
   const all=sGet('sessions',null)||[];
   let changed=false;
@@ -176,6 +180,22 @@ function migrateSessions(){
       s.fixes=(s.fixes||[]).concat(f.id);changed=true;
     });
   });
+  // 5 Nov: an entry logged just after midnight landed on Thursday. Remove it
+  // (only ones created before 3am that night) and log Wednesday as planned.
+  const before=all.length,cut=new Date('2026-11-05T03:00:00+05:30').getTime();
+  for(let i=all.length-1;i>=0;i--){
+    const s=all[i];if(s.date!=='2026-11-05')continue;
+    const t=/^[0-9a-z]{8}/.test(String(s.id))?parseInt(String(s.id).slice(0,8),36):0;
+    if(t>cut-24*3600e3&&t<cut)all.splice(i,1);
+  }
+  if(all.length!==before)changed=true;
+  if(!all.some(function(s){return s.date==='2026-11-04'})){
+    const pk=(sGet('picks',null)||{})['2026-11-04'];
+    all.push({id:'log-2026-11-04',date:'2026-11-04',plan:'upperB',groups:['back','chest','shoulders','arms','cardio'],
+      exercises:pk&&Array.isArray(pk.exercises)&&pk.exercises.length?pk.exercises.slice():UPPER_B_1104.slice(),
+      notes:'Logged afterwards: the coach\'s Upper B for the day.'});
+    changed=true;
+  }
   if(changed){S.cache.sessions=all;S.at.sessions=Date.now();lsWrite('sessions',all);lsWrite('__at',S.at);cloudWrite('sessions')}
 }
 
