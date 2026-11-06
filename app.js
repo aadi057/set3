@@ -91,14 +91,17 @@ const HOLD_MS=450;
 let _hold=null,_holdFired=false;
 document.addEventListener('pointerdown',function(e){
   _holdFired=false;
-  const el=e.target.closest('[data-hold-g]');if(!el||e.button>0)return;
+  const el=e.target.closest('[data-hold-g],[data-hold-ex]');if(!el||e.button>0)return;
   el.classList.add('holding');
   _hold={el:el,x:e.clientX,y:e.clientY,t:setTimeout(function(){
     _holdFired=true;el.classList.remove('holding');_hold=null;
     try{if(navigator.vibrate)navigator.vibrate(12)}catch(err){}
-    openExPicker(el.dataset.holdCtx,el.dataset.holdG);
+    holdAction(el);
   },HOLD_MS)};
 });
+function holdAction(el){
+  if(el.dataset.holdEx)toggleSwaps(el);else openExPicker(el.dataset.holdCtx,el.dataset.holdG);
+}
 function holdCancel(){if(_hold){clearTimeout(_hold.t);_hold.el.classList.remove('holding');_hold=null}}
 document.addEventListener('pointermove',function(e){if(_hold&&Math.hypot(e.clientX-_hold.x,e.clientY-_hold.y)>10)holdCancel()},{passive:true});
 document.addEventListener('pointerup',holdCancel);
@@ -106,9 +109,9 @@ document.addEventListener('pointercancel',holdCancel);
 // The click that ends a hold must not also tap whatever is underneath.
 document.addEventListener('click',function(e){if(_holdFired){_holdFired=false;e.preventDefault();e.stopPropagation()}},true);
 document.addEventListener('contextmenu',function(e){
-  const el=e.target.closest('[data-hold-g]');if(!el)return;
+  const el=e.target.closest('[data-hold-g],[data-hold-ex]');if(!el)return;
   e.preventDefault();
-  if(!_holdFired&&e.pointerType!=='touch'){holdCancel();openExPicker(el.dataset.holdCtx,el.dataset.holdG)}
+  if(!_holdFired&&e.pointerType!=='touch'){holdCancel();holdAction(el)}
 });
 
 // ── Exercises for a day ────────────────────────────────
@@ -154,14 +157,56 @@ function setPicks(ctx,list){
   }
 }
 // done=true lists what was done (equipment), otherwise what to do (sets × reps).
-function exRows(list,key,done){
+// ctx (a date or 'log') makes each row holdable to show its swaps.
+function exRows(list,key,done,ctx){
   if(!list.length)return '<p class="hint">No exercises picked yet. Hold a muscle group to choose.</p>';
-  return '<div class="moves">'+list.map(function(n){
+  return '<div class="moves" data-key="'+esc(key||'')+'">'+list.map(function(n){
     const g=GROUP(exGroup(n)),e=exInfo(n);
-    return '<div class="mv"><b><i class="mv-dot '+(g?'t-'+g.tone:'')+'"></i>'+esc(n)+'</b>'
-      +(done?'<small>'+esc(e&&e.eq&&e.eq!=='Yours'?e.eq:'')+'</small>':'<span>'+esc(doseFor(n,key))+'</span>')+'</div>';
+    return '<div class="mv'+(ctx?' hold':'')+'"'+(ctx?' data-hold-ex="'+esc(n)+'" data-hold-ctx="'+ctx+'" role="button" tabindex="0" aria-label="'+esc(n)+'. Hold to see swaps" aria-expanded="false"':'')+'><b><i class="mv-dot '+(g?'t-'+g.tone:'')+'"></i>'+esc(n)+'</b>'
+      +(done?'<small>'+esc(e&&e.eq&&e.eq!=='Yours'?e.eq:'')+'</small>':'<span>'+esc(doseFor(n,key,list))+'</span>')+'</div>';
   }).join('')+'</div>';
 }
+
+// ── Swaps (hold an exercise row) ───────────────────────
+function closeSwaps(){
+  document.querySelectorAll('.mv-swap').forEach(function(p){p.remove()});
+  document.querySelectorAll('.mv.open').forEach(function(r){r.classList.remove('open');r.setAttribute('aria-expanded','false')});
+}
+function toggleSwaps(row){
+  const was=row.classList.contains('open');
+  closeSwaps();if(was)return;
+  const n=row.dataset.holdEx,ctx=row.dataset.holdCtx,st=pickState(ctx);
+  if(!st.editable){toast(fmtD(st.date)+' is over, so it\'s locked');return}
+  const sw=swapsFor(n,st.key),e=exInfo(n),inList={};st.list.forEach(function(x){inList[x]=1});
+  let inner;
+  if(sw){
+    inner='<p class="sw-job">Same job: '+esc(sw.job)+'</p><div class="px-chips">'+sw.options.map(function(o){
+      const taken=!!inList[o.n];
+      return '<button class="xchip sw'+(o.coach?' coach':'')+'"'+(taken?' disabled':'')+' data-from="'+esc(n)+'" data-to="'+esc(o.n)+'" data-ctx="'+ctx+'" onclick="swapEx(this)">'
+        +(o.coach?'<span class="x-coach">'+ic('sparkles')+'</span>':'')+esc(o.n)
+        +'<small>'+(taken?'in session':o.coach?'coach pick':esc(o.dose))+'</small></button>';
+    }).join('')+'</div>'+(sw.tip?'<p class="sw-tip">'+esc(sw.tip)+'</p>':'');
+  } else {
+    const free=!e||/body|none|yours/i.test(e.eq||'')||e.k==='mobility';
+    inner='<p class="sw-tip">'+(free?'No equipment needed, so this one is never taken.':'No close swap in the list for this one. Hold its muscle group above to browse everything.')+'</p>';
+  }
+  const p=document.createElement('div');p.className='mv-swap';p.innerHTML=inner;
+  row.after(p);row.classList.add('open');row.setAttribute('aria-expanded','true');
+}
+function swapEx(btn){
+  const ctx=btn.dataset.ctx,from=btn.dataset.from,to=btn.dataset.to,st=pickState(ctx);
+  if(!st.editable)return;
+  const list=st.list.slice(),i=list.indexOf(from);
+  if(i<0)return;
+  if(list.indexOf(to)>=0){toast(to+' is already in this session');return}
+  list[i]=to;setPicks(ctx,list);
+  const sh=document.getElementById('ov-sheet');
+  if(sh&&sh.dataset.planDay===ctx)openPlanDay(ctx);
+  toast('Swapped in '+to);
+}
+document.addEventListener('keydown',function(e){
+  if((e.key==='Enter'||e.key===' ')&&e.target.matches&&e.target.matches('.mv.hold')){e.preventDefault();toggleSwaps(e.target)}
+});
 
 // ── Exercise picker ────────────────────────────────────
 let _px=null;
@@ -497,7 +542,8 @@ function openPlanDay(date){
       +chips(s.groups||[])
       +(activityText(s)?'<p class="hint">'+ic('mobility')+' '+activityText(s)+(walkCounts(s)?' · counted as a cardio day':'')+'</p>':'')
       +(s.notes?'<p class="note-block" style="margin-top:12px">'+esc(s.notes)+'</p>':'')
-      +'<label class="lbl">'+label+'</label>'+(st.list.length||P?exRows(st.list,s.plan,st.confirmed):'<p class="hint">No exercises saved for this day.</p>')
+      +'<label class="lbl">'+label+'</label>'+(st.list.length||P?exRows(st.list,s.plan,st.confirmed,st.editable?date:null):'<p class="hint">No exercises saved for this day.</p>')
+      +(st.editable&&st.list.length?'<p class="hold-hint">Hold an exercise to swap it</p>':'')
       +(!st.confirmed&&P&&st.editable?'<p class="hint">'+ic('info')+'Hold a muscle group to swap in what you actually did.</p>':'')
       +'<div class="row-btns"><button class="btn ghost" onclick="closeOverlays()">Close</button>'+(st.editable?'<button class="btn" onclick="closeOverlays();openLog(\''+date+'\')">Edit</button>':'')+'</div>');
   } else if(st.mode==='none'){
@@ -509,7 +555,8 @@ function openPlanDay(date){
       +chips(groups)
       +'<div class="why-lbl">Why '+(date===td?'today':'this day')+'</div><ul class="why">'+rec.reasons.slice(0,3).map(function(r){return '<li>'+esc(r)+'</li>'}).join('')+'</ul>'
       +(date===td?'':'<p class="hint">'+ic('info')+'Assumes you follow the plan until then. It updates as you log.</p>')
-      +'<label class="lbl">The session <span class="lbl-tag">'+(st.confirmed?'Your picks':'Coach picks')+'</span></label>'+exRows(st.list,rec.key)
+      +'<label class="lbl">The session <span class="lbl-tag">'+(st.confirmed?'Your picks':'Coach picks')+'</span></label>'+exRows(st.list,rec.key,false,date)
+      +(st.list.length?'<p class="hold-hint">Hold an exercise to see equal swaps, for when its machine is taken</p>':'')
       +(P.finish?'<p class="hint">'+ic('cardio')+esc(P.finish)+'</p>':'')
       +(['lower','upper','full'].indexOf(P.kind)>=0?'<button class="link" onclick="openLiftRules()">'+ic('list')+'How to lift: reps in the tank, rest, moving up</button>':'')
       +'<div class="row-btns"><button class="btn ghost" onclick="closeOverlays()">Close</button>'+(date===td&&rec.key!=='rest'?'<button class="btn" onclick="closeOverlays();logFromRec()">Log this</button>':'')+'</div>');

@@ -69,11 +69,101 @@ const PLAN={
     moves:[['Easy Walk','20–30 min, optional'],['Hamstring Stretch','optional']],
     finish:'Muscle is rebuilt on rest days. Eat your protein and get to bed on time.'},
 };
+// ── Swaps ─────────────────────────────────────────────
+// For each coach exercise: moves that do the same job when its machine is
+// taken. Matched on movement pattern first (squat, hinge, horizontal press,
+// vertical pull…), then the muscle doing the work, then joint angle, closest
+// first. A dose is given only where it differs from the slot's dose
+// (one arm or leg at a time, or a hold instead of reps).
+const SWAPS={
+  // Lower body
+  'Leg Press':{job:'squat pattern · quads and glutes',alts:['Hack Squat Machine','Pendulum Squat','Smith Machine Squat','Belt Squat','Goblet Squat'],
+    tip:'Goblet squat tops out on weight. Use the heaviest dumbbell you can hold for clean reps.'},
+  'Goblet Squat':{job:'squat pattern · quads and glutes',alts:['Dumbbell Squat','Smith Machine Squat','Hack Squat Machine','Leg Press','Box Squat']},
+  'Leg Extension':{job:'knee straightening · quads only',alts:[['Spanish Squat','2 × 12–15'],['Band Leg Extension','2 × 15–20'],'Hack Squat Machine','Leg Press'],
+    tip:'Nothing isolates the quads like this machine. On leg press or hack squat, set your feet low and narrow so your knees travel forward.'},
+  'Seated Leg Curl':{job:'knee bend · hamstrings',alts:['Lying Leg Curl',['Standing Leg Curl','3 × 10–12 per leg'],['Stability-Ball Leg Curl','3 × 10–12']],
+    tip:'Seated curl stretches the hamstrings most, so lying curl is the closest swap. Ball curls are bodyweight; go slow.'},
+  'Lying Leg Curl':{job:'knee bend · hamstrings',alts:['Seated Leg Curl',['Standing Leg Curl','2 × 10–12 per leg'],['Stability-Ball Leg Curl','2 × 10–12']]},
+  'Standing Calf Raise':{job:'straight-knee calf raise · calves',alts:['Leg Press Calf Press','Smith Calf Raise',['Single-Leg Calf Raise','2 × 12–15 per leg'],'Donkey Calf Raise','Seated Calf Raise'],
+    tip:'Keep the knees straight so the main calf muscle works. Seated calf raise bends the knee and mostly trains the deeper soleus, so it is the last pick.'},
+  'Hip Thrust (Machine)':{job:'hip drive · glutes',alts:['Hip Thrust (Barbell)','Smith Machine Hip Thrust','Dumbbell Hip Thrust','Glute Bridge','Cable Pull-Through'],
+    tip:'Pause a second at the top with your ribs down. Glute bridge is lighter, so slow the reps down.'},
+  'Romanian Deadlift (Dumbbell)':{job:'hip hinge · hamstrings and glutes',alts:['Romanian Deadlift','45° Back Extension','Cable Pull-Through',['Single-Leg RDL','2 × 8–10 per leg']],
+    tip:'On the 45° back extension, hinge at the hips with a flat back. That keeps it on the hamstrings and glutes, not the lower back.'},
+  'Walking Lunge':{job:'single-leg squat · quads and glutes',alts:['Reverse Lunge (Dumbbell)','Split Squat','Step-Up (Dumbbell)','Bulgarian Split Squat'],
+    tip:'Reverse lunge is easiest on the knees. Bulgarian split squat is the hardest, so start it with bodyweight.'},
+  'Abductor Machine':{job:'hip abduction · side glutes (glute medius)',alts:[['Cable Hip Abduction','2 × 15 per side'],['Lateral Band Walk','2 × 12 steps each way'],['Side-Lying Hip Abduction','2 × 15 per side'],['Monster Walk','2 × 12 steps each way']]},
+  // Upper body
+  'Chest Press Machine':{job:'flat press · chest, front shoulders, triceps',alts:['Dumbbell Bench Press','Smith Machine Bench Press','Cable Chest Press','Barbell Bench Press',['Push-Up','3 × 8–15']],
+    tip:'Use barbell bench only with a spotter or safety bars. Push-ups too hard? Do them with your hands on a bench.'},
+  'Incline Dumbbell Press':{job:'incline press · upper chest, front shoulders',alts:['Incline Chest Press Machine','Smith Machine Incline Press','Incline Barbell Press','Incline Cable Press',['Feet-Elevated Push-Up','3 × 8–12']],
+    tip:'Keep the bench at about 30°. Steeper turns it into a shoulder press.'},
+  'Seated Cable Row':{job:'horizontal pull · mid-back and lats',alts:['Seated Row Machine','Chest-Supported Row',['Single-Arm Cable Row','3 × 10–12 per arm'],['Dumbbell Row (Single Arm)','3 × 10–12 per arm'],'T-Bar Row']},
+  'Dumbbell Row (Single Arm)':{job:'horizontal pull · lats and mid-back',alts:[['Single-Arm Cable Row','3 × 10 per arm'],['Chest-Supported Dumbbell Row','3 × 10–12'],['Seated Cable Row','3 × 10–12'],['Seated Row Machine','3 × 10–12'],['Hammer Strength Row','3 × 10–12']]},
+  'Lat Pulldown':{job:'vertical pull · lats',alts:['Assisted Pull-Up Machine','Lat Pulldown Machine',['Single-Arm Pulldown','3 × 10–12 per arm'],'Machine High Row','Straight-Arm Pulldown'],
+    tip:'Straight-arm pulldown works the lats without the biceps, so go a little lighter.'},
+  'Shoulder Press Machine':{job:'overhead press · front and side shoulders, triceps',alts:['Dumbbell Shoulder Press','Smith Machine Shoulder Press','Landmine Press','Arnold Press'],
+    tip:'Seated with back support is safest. If pressing overhead bothers your shoulder, landmine press is the gentlest.'},
+  'Lateral Raise (Dumbbell)':{job:'side raise · side shoulders',alts:['Lateral Raise Machine',['Single-Arm Cable Lateral Raise','3 × 12–15 per arm'],'Lateral Raise (Cable)','Seated Lateral Raise'],
+    tip:'Don\'t swap in an upright row or shoulder press. Those move the work to the front shoulders and traps.'},
+  'Rear Delt Fly (Dumbbell)':{job:'arms out to the sides · rear shoulders',alts:['Reverse Pec Deck','Rear Delt Fly (Cable)','Chest-Supported Rear-Delt Fly','Face Pull',['Band Pull-Apart','2 × 15–20']]},
+  'Face Pull':{job:'pull to the face · rear shoulders and upper back',alts:['Reverse Pec Deck','Rear Delt Fly (Cable)','Band Face Pull','Rear Delt Fly (Dumbbell)',['Band Pull-Apart','2 × 15–20']]},
+  'Tricep Pushdown (Rope)':{job:'elbow straightening · triceps',alts:['Tricep Pushdown (Bar)','Dip Machine','Overhead Dumbbell Extension','Skull Crusher',['Tricep Kickback','2 × 12 per arm']]},
+  'Overhead Tricep Extension':{job:'arms-overhead extension · triceps (long head)',alts:['Rope Overhead Extension','EZ-Bar Overhead Extension',['Single-Arm Overhead Extension','2 × 12 per arm'],'Skull Crusher','Tricep Pushdown (Rope)'],
+    tip:'Overhead versions build the triceps more than pushdowns, so pick one of those first.'},
+  'Dumbbell Curl':{job:'elbow bend · biceps',alts:['Cable Curl','EZ Bar Curl','Machine Bicep Curl','Preacher Curl','Incline Dumbbell Curl']},
+  'Hammer Curl':{job:'neutral-grip curl · biceps and forearm (brachialis)',alts:['Cable Hammer Curl (Rope)','Cross-Body Hammer Curl','EZ Reverse Curl','Dumbbell Curl']},
+  // Core
+  'Dead Bug':{job:'core · stop the lower back arching',alts:[['Bird Dog','2 × 8 per side'],['Plank','2 × 30–45 s'],['Hollow Body Hold','2 × 20–30 s'],['Stability-Ball Rollout','2 × 8']]},
+  'Plank':{job:'core · stop the lower back arching',alts:[['Dead Bug','2 × 8 per side'],['Hollow Body Hold','2 × 20–30 s'],['Stability-Ball Rollout','2 × 8'],['Bird Dog','2 × 8 per side']]},
+  'Side Plank':{job:'core · stop bending sideways',alts:[['Suitcase Carry','2 × 20–30 m per side'],['Pallof Press','2 × 10 per side'],['Offset Farmer Carry','2 × 20–30 m per side']]},
+  // Cardio
+  'Treadmill Incline Walk':{job:'steady cardio · breathing harder but can still talk',alts:['Stairmaster / StepMill','Elliptical','Stationary Bike','Recumbent Bike','Rowing Machine'],
+    tip:'Keep the same time and effort. Recumbent bike is easiest on the knees and back.'},
+  'Outdoor Brisk Walk':{job:'steady cardio · easy pace',alts:['Treadmill Incline Walk','Elliptical','Stationary Bike','Outdoor Cycling']},
+  'Easy Walk':{job:'easy movement',alts:['Treadmill Walk','Stationary Bike','Recumbent Bike']},
+  'Hip Flexor Stretch':{job:'stretch · front of the hip',alts:['Couch Stretch']},
+};
+const swapName=function(a){return Array.isArray(a)?a[0]:a};
+function swapHas(orig,name){const S=SWAPS[orig];return !!S&&S.alts.some(function(a){return swapName(a)===name})}
+// Which coach exercise a name stands in for, in this plan.
+function swapOrigin(name,key){
+  const P=PLAN[key],moves=P?P.moves.map(function(m){return m[0]}):[];
+  if(moves.indexOf(name)>=0)return name;
+  for(let i=0;i<moves.length;i++){if(swapHas(moves[i],name))return moves[i]}
+  if(SWAPS[name])return name;
+  for(const k in SWAPS){if(swapHas(k,name))return k}
+  return null;
+}
+// Swap options for an exercise in a plan: the coach pick plus its alternatives,
+// without the exercise itself. null when nothing in the table matches.
+function swapsFor(name,key){
+  const orig=swapOrigin(name,key);if(!orig)return null;
+  const S=SWAPS[orig];
+  const opts=[orig].concat(S.alts.map(swapName)).filter(function(n){return n!==name});
+  return {orig:orig,job:S.job,tip:S.tip||'',options:opts.map(function(n){return {n:n,dose:doseFor(n,key,null,orig),coach:n===orig&&planDefaults(key).indexOf(orig)>=0}})};
+}
 function planDefaults(key){return PLAN[key]?PLAN[key].moves.map(function(m){return m[0]}):[]}
-function doseFor(name,key){
+// list (optional) is the day's exercises: a swap that fits two slots takes
+// the dose of the slot whose coach pick it replaced (the one not in the list).
+// orig (optional) names that slot directly.
+function doseFor(name,key,list,orig){
   const P=PLAN[key];
-  if(P){for(let i=0;i<P.moves.length;i++){if(P.moves[i][0]===name)return P.moves[i][1]}}
+  if(P){
+    for(let i=0;i<P.moves.length;i++){if(P.moves[i][0]===name)return P.moves[i][1]}
+    const slots=P.moves.filter(function(m){return swapHas(m[0],name)});
+    const pick=(orig&&slots.filter(function(m){return m[0]===orig})[0])
+      ||(list&&slots.filter(function(m){return list.indexOf(m[0])<0})[0])||slots[0];
+    if(pick)return slotDose(pick[0],name,pick[1]);
+  }
+  if(orig&&swapHas(orig,name))return slotDose(orig,name,genericDose(name));
   return genericDose(name);
+}
+// A swap's own dose if it has one, otherwise the slot's.
+function slotDose(orig,name,fallback){
+  const a=SWAPS[orig].alts.filter(function(x){return swapName(x)===name})[0];
+  return Array.isArray(a)?a[1]:fallback;
 }
 const STRENGTH_KEYS=['lowerA','upperA','lowerB','upperB','full'];
 const WALK_STEPS_CARDIO=6000;   // a walk day with this many steps counts as cardio
