@@ -521,7 +521,7 @@ function weekStripCard(){
 function planCard(){
   const typical=[['Mon','lowerA'],['Tue','upperA'],['Wed','cardio'],['Thu','lowerB'],['Fri','upperB'],['Sat','long'],['Sun','rest']];
   return '<section class="card plan-card"><h3>Upper/lower, 4 + 2 + 1</h3>'
-    +'<p class="small">Four strength days, two cardio days, one rest day. Each muscle is trained twice a week with 48 hours between, and every strength day ends with a 15-minute incline walk.</p>'
+    +'<p class="small">Four strength days, at least one dedicated cardio day, and your rest days. Each muscle is trained twice a week with 48 hours between, and every strength day ends with a 20–25 minute incline walk.</p>'
     +'<div class="plan-week">'+typical.map(function(t){const P=PLAN[t[1]];return '<div class="pw"><span>'+t[0]+'</span><i class="t-'+P.tone+'"></i><b>'+P.title+'</b><small>'+P.sub+'</small></div>'}).join('')+'</div>'
     +'<p class="small">Missed a day? Nothing breaks. The coach just moves to the next session in the rotation.</p>'
     +'<button class="link" onclick="openLiftRules()">'+ic('list')+'How to lift on this plan</button>'

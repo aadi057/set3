@@ -5,8 +5,9 @@
 //   Lower A · Upper A · Cardio · Lower B · Upper B · Long cardio · Rest
 // Strength days rotate lower → upper → lower → upper, so every muscle is
 // trained twice a week with 48h+ between hits. After two lifting days in a
-// row comes a cardio day. Every strength day ends with a 15-min incline
-// walk, which puts weekly cardio around 150 min.
+// row comes a cardio day. Every strength day ends with a 20–25 min incline
+// walk. With weekends as rest days, 4 finishers + 1 cardio day puts weekly
+// cardio around 150–180 min (WHO minimum is 150).
 //
 // Today's suggestion, rules in order:
 //  1. Six training days in a row → rest.
@@ -20,8 +21,9 @@
 //     every week instead of letting lifts spill into Sunday.
 //  7. Otherwise the next strength day in the rotation, unless its muscles
 //     were trained under 48h ago (then the other half, else cardio).
-// Big walk days (6,000+ steps, or 30+ min) count as cardio days: an 8,000-step
-// day is roughly an hour of moderate activity, the kind the WHO counts.
+// Big walk days (6,000+ steps, or 30+ min) count as cardio days. Only the brisk
+// part (~100+ steps/min) is moderate activity, so treat them as a bonus, not a
+// replacement for the planned cardio day.
 // Missed a day? Nothing breaks; the rotation just continues.
 // ══════════════════════════════════════════════════════
 const STRENGTH_DAYS_TARGET=4;   // per 7 days
@@ -42,16 +44,16 @@ const PLAN_RULES=[
 // coach's picks; you can swap any of them per day. groups = what gets logged.
 const PLAN={
   lowerA:{title:'Lower A',sub:'Quads + core',kind:'lower',tone:'yellow',icon:'legs',groups:['legs','core','cardio'],
-    moves:[['Leg Press','3 × 10–12'],['Goblet Squat','3 × 8–10'],['Seated Leg Curl','3 × 10–12'],['Leg Extension','2 × 12–15'],['Standing Calf Raise','2 × 12–15'],['Dead Bug','2 × 8 per side'],['Treadmill Incline Walk','15 min']],
+    moves:[['Leg Press','3 × 10–12'],['Goblet Squat','3 × 8–10'],['Seated Leg Curl','3 × 10–12'],['Leg Extension','2 × 12–15'],['Standing Calf Raise','2 × 12–15'],['Dead Bug','2 × 8 per side'],['Treadmill Incline Walk','20–25 min']],
     finish:'Walk at incline 4–6, at a pace where you can still talk.'},
   upperA:{title:'Upper A',sub:'Push + pull',kind:'upper',tone:'pink',icon:'chest',groups:['chest','back','shoulders','arms','cardio'],
-    moves:[['Chest Press Machine','3 × 8–12'],['Seated Cable Row','3 × 10–12'],['Shoulder Press Machine','2 × 10–12'],['Lat Pulldown','2 × 10–12'],['Rear Delt Fly (Dumbbell)','2 × 12–15'],['Tricep Pushdown (Rope)','2 × 12'],['Dumbbell Curl','2 × 12'],['Treadmill Incline Walk','15 min']],
+    moves:[['Chest Press Machine','3 × 8–12'],['Seated Cable Row','3 × 10–12'],['Shoulder Press Machine','2 × 10–12'],['Lat Pulldown','2 × 10–12'],['Rear Delt Fly (Dumbbell)','2 × 12–15'],['Tricep Pushdown (Rope)','2 × 12'],['Dumbbell Curl','2 × 12'],['Treadmill Incline Walk','20–25 min']],
     finish:'Walk at incline 4–6, at a pace where you can still talk.'},
   lowerB:{title:'Lower B',sub:'Glutes + hamstrings',kind:'lower',tone:'yellow',icon:'legs',groups:['legs','core','cardio'],
-    moves:[['Hip Thrust (Machine)','3 × 10–12'],['Romanian Deadlift (Dumbbell)','3 × 8–10'],['Walking Lunge','2 × 10 per leg'],['Lying Leg Curl','2 × 10–12'],['Abductor Machine','2 × 15'],['Plank','2 × 30–45 s'],['Treadmill Incline Walk','15 min']],
+    moves:[['Hip Thrust (Machine)','3 × 10–12'],['Romanian Deadlift (Dumbbell)','3 × 8–10'],['Walking Lunge','2 × 10 per leg'],['Seated Leg Curl','2 × 10–12'],['Abductor Machine','2 × 15'],['Plank','2 × 30–45 s'],['Treadmill Incline Walk','20–25 min']],
     finish:'Walk at incline 4–6, at a pace where you can still talk.'},
   upperB:{title:'Upper B',sub:'Back + shoulders',kind:'upper',tone:'pink',icon:'back',groups:['back','chest','shoulders','arms','cardio'],
-    moves:[['Lat Pulldown','3 × 8–12'],['Incline Dumbbell Press','3 × 8–10'],['Dumbbell Row (Single Arm)','3 × 10 per arm'],['Lateral Raise (Dumbbell)','3 × 12–15'],['Face Pull','2 × 15'],['Hammer Curl','2 × 12'],['Overhead Tricep Extension','2 × 12'],['Treadmill Incline Walk','15 min']],
+    moves:[['Lat Pulldown','3 × 8–12'],['Incline Dumbbell Press','3 × 8–10'],['Dumbbell Row (Single Arm)','3 × 10 per arm'],['Lateral Raise (Dumbbell)','3 × 12–15'],['Face Pull','2 × 15'],['Hammer Curl','2 × 12'],['Overhead Tricep Extension','2 × 12'],['Treadmill Incline Walk','20–25 min']],
     finish:'Walk at incline 4–6, at a pace where you can still talk.'},
   full:{title:'Full body',sub:'Easing back in',kind:'full',tone:'green',icon:'gym',groups:['legs','chest','back','core','cardio'],
     moves:[['Leg Press','2 × 12'],['Chest Press Machine','2 × 12'],['Lat Pulldown','2 × 12'],['Hip Thrust (Machine)','2 × 12'],['Seated Cable Row','2 × 12'],['Dead Bug','2 × 8 per side'],['Treadmill Incline Walk','10 min']],
@@ -308,9 +310,9 @@ function recommend(asOf,list){
     const main=kind==='lower'?['legs']:['chest','back'];
     const since=main.map(function(k){return st.groups[k].since}).filter(function(x){return x!=null});
     if(since.length)reasons.push((kind==='lower'?'Legs':'Chest and back')+' last trained '+agoText(Math.min.apply(null,since))+', so they\'ve had the 48 hours they need.');
-    if(kind==='lower')reasons.push('Legs get two days a week because your InBody scan showed low leg muscle, and they\'re your biggest calorie burners at rest.');
+    if(kind==='lower')reasons.push('Legs get two days a week because your InBody scan showed low leg muscle, and they\'re your biggest muscles. More leg muscle clears more blood sugar after meals.');
     else reasons.push('Two upper days balance the two leg days, so every muscle gets trained twice a week.');
-    reasons.push(weekLine+' The 15-min walk at the end counts as cardio.');
+    reasons.push(weekLine+' The 20–25 min walk at the end counts as cardio.');
     return out(key,reasons);
   }
   const bl=blockedBy('lower').concat(blockedBy('upper'));
@@ -358,7 +360,7 @@ const COACH_SOURCES=[
   ['Upper/lower, each muscle twice a week','Training a muscle twice a week builds more than once a week.','Schoenfeld, Ogborn & Krieger (2016), Sports Medicine, meta-analysis'],
   ['Sets, reps and 48h recovery','For newer lifters: 1–3 sets of 8–12 reps, and about 48 hours before training the same muscle hard again.','American College of Sports Medicine, resistance training position stand (2009)'],
   ['Stop 2–3 reps short of failure','Sets ended a few reps before failure build similar muscle with less fatigue, so you recover faster for the next session.','Refalo et al. (2023), Sports Medicine, meta-analysis'],
-  ['How much cardio','150–250 minutes a week gives modest fat loss; more than 250 gives more. The plan gets you to about 150 and builds from there.','Donnelly et al. (2009), ACSM position stand on physical activity and weight loss'],
+  ['How much cardio','150–250 minutes a week gives modest fat loss; more than 250 gives more. The plan gets you to about 150–180 a week: four 20–25 min finishers plus one 35–45 min cardio day.','Donnelly et al. (2009), ACSM position stand on physical activity and weight loss'],
   ['Cardio for visceral fat','Aerobic exercise reduces visceral fat; resistance training alone had little effect on it.','Ismail et al. (2012), Obesity Reviews, meta-analysis'],
   ['Why both','Cardio cut the most fat; adding weights also built lean muscle. The combination does both, which is what recomposition needs.','Willis et al. (2012), Journal of Applied Physiology'],
   ['Spread it across the week','150–300 minutes of moderate activity weekly, plus muscle strengthening on 2 or more days.','World Health Organization guidelines (2020)'],
@@ -367,7 +369,7 @@ const COACH_SOURCES=[
 
 // ── Per-group details for the dial insight ─────────────
 const GROUP_INFO={
-  legs:{what:'Quads, hamstrings and glutes: the biggest muscles you have.',why:'Your InBody scan flagged low leg muscle. Building it raises your resting calorie burn more than any other group.',moves:['Leg press','Hip thrust','Romanian deadlift','Leg extension / leg curl','Walking lunges']},
+  legs:{what:'Quads, hamstrings and glutes: the biggest muscles you have.',why:'Your InBody scan flagged low leg muscle. Muscle is where most blood sugar is cleared after meals, and legs are your biggest muscles. The extra resting calorie burn is real but small, about 13 kcal per kg of muscle a day.',moves:['Leg press','Hip thrust','Romanian deadlift','Leg extension / leg curl','Walking lunges']},
   back:{what:'Lats, mid-back and rear shoulders.',why:'Balances all the pressing and the long hours at the edit desk, which helps posture.',moves:['Lat pulldown','Seated cable row','Single-arm dumbbell row','Face pull']},
   chest:{what:'Pecs, with front shoulders and triceps helping.',why:'Your main pushing strength. Pair it with back work so posture stays balanced.',moves:['Chest press machine','Incline dumbbell press','Pec fly machine','Push-ups']},
   shoulders:{what:'Front, side and rear delts.',why:'Side and rear delts give width and protect the shoulder joint. Rear delt flys count here.',moves:['Shoulder press machine','Lateral raises','Rear delt fly','Face pull']},
