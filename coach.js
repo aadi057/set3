@@ -272,9 +272,18 @@ function recommend(asOf,list){
   const weekLine='This week: '+st.strengthWeek+' of '+STRENGTH_DAYS_TARGET+' strength days, cardio on '+st.cardioWeek+' of '+CARDIO_TARGET+' days.';
   const walkLine=st.walk1?'Yesterday\'s walk'+(st.walk1.steps?' ('+st.walk1.steps.toLocaleString('en-IN')+' steps)':'')+' counts as a cardio day. Walking isn\'t leg training, so your legs are fresh.':null;
   const withWalk=function(r){if(walkLine)r.splice(Math.min(1,r.length),0,walkLine);return r};
+  // Coming back after 2+ missed training days (rest days don't count).
+  let missed=[];
+  if(st.lastAny){for(let d=addDays(st.lastAny,1);d<asOf;d=addDays(d,1)){if(isTrainingDay(d))missed.push(d)}}
+  const sm=shieldedMap(),allShielded=missed.length&&missed.every(function(d){return sm[d]});
+  const backLine=missed.length>=2&&(st.strengthGap==null||st.strengthGap<7)
+    ?'First session after '+missed.length+' missed training days'+(allShielded?' (shielded, so your streak is safe)':'')+'. A few days off won\'t cost you strength or muscle; that takes 2–3 weeks. Warm up a bit longer and stop each set 2–3 reps short, since the first day back brings more soreness.'
+    :null;
   function out(key,reasons){
     const P=PLAN[key];
-    return {key:key,plan:P,kind:P.kind,title:P.title,sub:P.sub,groups:P.groups.slice(),reasons:withWalk(reasons),stats:st,asOf:asOf};
+    reasons=withWalk(reasons);
+    if(backLine&&key!=='rest'&&key!=='full')reasons.splice(Math.min(1,reasons.length),0,backLine);
+    return {key:key,plan:P,kind:P.kind,title:P.title,sub:P.sub,groups:P.groups.slice(),reasons:reasons,stats:st,asOf:asOf};
   }
   function cardioDay(lead){
     return out(weekend?'long':'cardio',[lead,'Cardio is the biggest lever on visceral fat, and yours started at level '+BASELINE.visceral+'.',weekLine]);
@@ -320,16 +329,44 @@ function recommend(asOf,list){
 }
 
 // The week Mon–Sun: what you did, today, and what's planned if you follow it.
+// ── Streak shields ────────────────────────────────────
+// A shield covers up to 2 missed training days in a row, for things outside
+// your control. You hold 2; each comes back 30 days after the first day it
+// covered. Shielded days pause the streak: they don't add to it and never
+// count as workouts. Must be used within your next 2 training days.
+const SHIELD_MAX=2,SHIELD_SPAN=2,SHIELD_RECHARGE_DAYS=30;
+const SHIELD_REASONS=[['family','Family'],['work','Work crunch'],['travel','Travel'],['ill','Illness']];
+function shieldReason(k){const r=SHIELD_REASONS.filter(function(x){return x[0]===k})[0];return r?r[1]:'Unplanned'}
+function shieldedMap(){const m={};getShields().forEach(function(x){x.dates.forEach(function(d){m[d]=x})});return m}
+function shieldsInUse(asOf){return getShields().filter(function(x){const f=x.dates[0];return f<=asOf&&addDays(f,SHIELD_RECHARGE_DAYS)>asOf})}
+function shieldsLeft(asOf){return Math.max(0,SHIELD_MAX-shieldsInUse(asOf).length)}
+function shieldNextBack(asOf){const u=shieldsInUse(asOf).map(function(x){return addDays(x.dates[0],SHIELD_RECHARGE_DAYS)}).sort();return u[0]||null}
+function isTrainingDay(iso){return getRestDays().indexOf(new Date(iso+'T00:00:00').getDay())<0}
+// Missed training days a shield could still cover, oldest first: only the
+// last 2 training days before asOf, stopping at a workout or another shield.
+function shieldCandidates(asOf){
+  const worked={};getSess().forEach(function(s){if((s.groups||[]).length)worked[s.date]=1});
+  const sm=shieldedMap(),out=[];let seen=0;
+  for(let i=1;i<=7&&seen<SHIELD_SPAN;i++){
+    const d=addDays(asOf,-i);
+    if(!isTrainingDay(d))continue;
+    seen++;
+    if(worked[d]||sm[d])break;
+    out.unshift(d);
+  }
+  return out;
+}
+
 function weekPlan(){
   const td=today();
   const d=new Date(td+'T00:00:00');const mon=addDays(td,-((d.getDay()+6)%7));
-  const real=getSess();
+  const real=getSess(),shieldMap=shieldedMap();
   const sim=real.slice();
   const days=[];
   for(let i=0;i<7;i++){
     const iso=addDays(mon,i);
     const logged=real.filter(function(s){return s.date===iso&&(s.groups||[]).length})[0];
-    if(iso<td){days.push({date:iso,state:logged?'done':'off',session:logged});continue}
+    if(iso<td){days.push({date:iso,state:logged?'done':'off',session:logged,shield:!logged&&!!shieldMap[iso]});continue}
     if(iso===td&&logged){days.push({date:iso,state:'done',session:logged,today:true});continue}
     const rec=recommend(iso,sim);
     days.push({date:iso,state:iso===td?'today':'planned',rec:rec,today:iso===td});

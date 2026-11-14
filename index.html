@@ -508,6 +508,23 @@ textarea.inp{resize:vertical;min-height:64px;line-height:1.45}
 .mv b{display:flex;align-items:center;gap:8px}
 .mv-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;background:var(--card-2)}
 
+/* streak shields */
+.shield-pill{display:flex;align-items:center;gap:6px;margin:8px auto 0;font-size:12px;color:var(--ink-2);background:var(--card);border-radius:999px;padding:6px 12px;transition:transform var(--t-press) var(--ease)}
+.shield-pill:active{transform:scale(.95)}
+.shield-pill .ic{width:14px;height:14px}
+.shield-card .eyebrow{display:flex;align-items:center;gap:5px}
+.shield-card .eyebrow .ic{width:14px;height:14px}
+.sh-meter{display:flex;align-items:center;gap:6px;margin-top:12px;font-size:13px;color:var(--ink-2)}
+.sh-meter span:last-child{margin-left:4px}
+.sh-meter b{font-weight:500;color:var(--ink)}
+.sh-ic{width:30px;height:30px;border-radius:50%;display:grid;place-items:center;background:rgba(23,22,20,.08);color:var(--muted)}
+.sh-ic.on{background:var(--ink);color:var(--blue)}
+.sh-ic .ic{width:16px;height:16px}
+.ov .sh-ic.on{color:var(--blue)}
+.compact-rules li{font-size:13px}
+.cd.sh{box-shadow:inset 0 0 0 1.5px var(--blue);background:transparent;color:var(--ink)}
+.wd.shielded .wd-dot{box-shadow:none}
+
 /* hold an exercise row for swaps */
 .mv.hold{cursor:pointer;-webkit-touch-callout:none;-webkit-user-select:none;user-select:none;margin:0 -8px;padding-left:8px;padding-right:8px;border-radius:12px;transition:background-color var(--t-ui) var(--ease),transform var(--t-press) var(--ease)}
 .mv.hold.holding{transform:scale(.985)!important;box-shadow:none!important;background:var(--card-2);transition:transform .42s linear,background-color .42s linear!important}

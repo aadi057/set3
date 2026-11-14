@@ -332,18 +332,102 @@ function go(tab){
 function rerender(){RENDER[cur]();renderChrome()}
 
 // ── Streak ─────────────────────────────────────────────
-function calcStreak(){
+// Counts training days in a row. Today (until 4am), rest days and shielded
+// days are skipped: they neither add to the streak nor break it.
+// extra: dates to treat as shielded (to preview what a shield would save).
+function calcStreak(extra){
   const worked={};getSess().forEach(function(s){if((s.groups||[]).length)worked[s.date]=1});
-  const rd=getRestDays();
-  let n=0;const d=new Date();
+  const sm=shieldedMap(),td=today();
+  (extra||[]).forEach(function(d){sm[d]=1});
+  let n=0;
   for(let i=0;i<370;i++){
-    const iso=localISO(d);
+    const iso=addDays(td,-i);
     if(worked[iso])n++;
-    else if(i===0){}
-    else if(rd.indexOf(d.getDay())<0)break;
-    d.setDate(d.getDate()-1);
+    else if(i===0||sm[iso]||!isTrainingDay(iso)){}
+    else break;
   }
   return n;
+}
+
+// ── Streak shields (UI) ────────────────────────────────
+let _sh={days:[],reason:null};
+function shieldDaysText(days){
+  const w=function(d){return new Date(d+'T00:00:00').toLocaleDateString('en-IN',{weekday:'short',day:'numeric',month:'short'})};
+  return days.length===2?w(days[0])+' and '+w(days[1]):days.map(w).join(', ');
+}
+function shieldMeter(td){
+  const left=shieldsLeft(td),back=shieldNextBack(td);
+  let icons='';for(let i=0;i<SHIELD_MAX;i++)icons+='<span class="sh-ic'+(i<left?' on':'')+'">'+ic('shield')+'</span>';
+  return '<div class="sh-meter">'+icons+'<span><b>'+left+' of '+SHIELD_MAX+'</b> ready'+(back?' · next back '+fmtD(back):'')+'</span></div>';
+}
+function shieldCard(){
+  const td=today(),c=shieldCandidates(td);
+  if(!c.length)return '';
+  const left=shieldsLeft(td),keep=calcStreak(c);
+  const names=c.map(function(d){return new Date(d+'T00:00:00').toLocaleDateString('en-IN',{weekday:'long'})}).join(' and ');
+  return '<section class="card tone-blue shield-card"><div class="eyebrow">'+ic('shield')+' Streak Shield</div>'
+    +'<h3>Missed '+esc(names)+'?</h3>'
+    +(left?'<p>If something outside your control kept you away, a shield keeps your '+keep+'-day streak going.</p>'+shieldMeter(td)
+      +'<button class="btn sm" onclick="openShield()">Use a shield</button>'
+      :'<p>No shields left right now. Next one is back on '+fmtD(shieldNextBack(td))+'. Your training history is all still there, and the coach plans from it.</p>')
+    +'</section>';
+}
+function openShield(){
+  const td=today(),c=shieldCandidates(td),left=shieldsLeft(td);
+  _sh={days:c.slice(),reason:null};
+  const recent=getShields().slice().sort(function(a,b){return b.dates[0].localeCompare(a.dates[0])}).slice(0,4);
+  const canUndo=function(x){return x.at>=addDays(td,-2)};
+  openSheet('<div class="ins-head"><span class="dot big t-blue">'+ic('shield')+'</span><div><div class="eyebrow">Keep your streak</div><h3>Streak Shield</h3></div></div>'
+    +shieldMeter(td)
+    +(c.length&&left?'<label class="lbl">Cover these days</label><div class="chips wrap" id="sh-days">'+c.map(function(d){return '<button class="chip on" data-d="'+d+'" onclick="shToggleDay(this)">'+esc(shieldDaysText([d]))+'</button>'}).join('')+'</div>'
+      +'<label class="lbl">What happened?</label><div class="chips wrap" id="sh-why">'+SHIELD_REASONS.map(function(r){return '<button class="chip" data-r="'+r[0]+'" onclick="shPickReason(this)">'+r[1]+'</button>'}).join('')+'</div>'
+      +'<p class="hint">'+ic('info')+'Your streak would stay at <b id="sh-keep">'+calcStreak(c)+'</b> days.</p>'
+      +'<div class="row-btns"><button class="btn ghost" onclick="closeOverlays()">Not now</button><button class="btn" id="sh-go" disabled onclick="useShield()">'+ic('shield')+'Use 1 shield</button></div>'
+      :c.length?'<p class="hint">'+ic('info')+'No shields left. The next one is back on '+fmtD(shieldNextBack(td))+'.</p>'
+      :'<p class="hint">'+ic('info')+'No missed training days to cover right now.</p>')
+    +'<label class="lbl">How shields work</label><ul class="why compact-rules">'
+    +'<li>One shield covers up to '+SHIELD_SPAN+' missed training days in a row.</li>'
+    +'<li>Only for things outside your control: family, work crunch, travel, illness. There\'s no "didn\'t feel like it".</li>'
+    +'<li>Use it within your next '+SHIELD_SPAN+' training days. Rest days don\'t count toward that.</li>'
+    +'<li>You hold '+SHIELD_MAX+'. Each one comes back '+SHIELD_RECHARGE_DAYS+' days after the first day it covered.</li>'
+    +'<li>Shielded days pause your streak. They don\'t add to it and never count as workouts, so the coach still sees the gap.</li></ul>'
+    +(recent.length?'<label class="lbl">Used</label><div class="list flat">'+recent.map(function(x){
+      return '<div class="row static"><span class="dot t-blue">'+ic('shield')+'</span><span class="row-main"><b>'+esc(shieldDaysText(x.dates))+'</b><small>'+esc(shieldReason(x.reason))+' · back '+fmtD(addDays(x.dates[0],SHIELD_RECHARGE_DAYS))+'</small></span>'
+        +(canUndo(x)?'<button class="link" onclick="undoShield(\''+x.id+'\')">Undo</button>':'')+'</div>';
+    }).join('')+'</div>':'')
+    +(c.length&&left?'':'<div class="row-btns"><button class="btn" onclick="closeOverlays()">Close</button></div>'));
+}
+function shToggleDay(b){
+  const d=b.dataset.d,all=shieldCandidates(today()),i=_sh.days.indexOf(d);
+  if(i>=0)_sh.days.splice(i,1);else _sh.days.push(d);
+  // Keep the cover contiguous: a later day needs the earlier one(s) after it.
+  _sh.days=all.filter(function(x){return _sh.days.indexOf(x)>=0});
+  if(_sh.days.length===1&&all.length===2&&_sh.days[0]===all[0]){_sh.days=[];toast('Cover the most recent day too, or just that one')}
+  document.querySelectorAll('#sh-days .chip').forEach(function(c){c.classList.toggle('on',_sh.days.indexOf(c.dataset.d)>=0)});
+  shSync();
+}
+function shPickReason(b){
+  _sh.reason=b.dataset.r;
+  document.querySelectorAll('#sh-why .chip').forEach(function(c){c.classList.toggle('on',c===b)});
+  shSync();
+}
+function shSync(){
+  const go=document.getElementById('sh-go'),k=document.getElementById('sh-keep');
+  if(go)go.disabled=!(_sh.days.length&&_sh.reason);
+  if(k)k.textContent=calcStreak(_sh.days);
+}
+function useShield(){
+  const td=today(),c=shieldCandidates(td);
+  const days=c.filter(function(d){return _sh.days.indexOf(d)>=0});
+  if(!days.length||!_sh.reason)return;
+  if(!shieldsLeft(td)){toast('No shields left');return}
+  putShields(getShieldsAll().concat([{id:uid(),dates:days,reason:_sh.reason,at:td}]));
+  closeOverlays();rerender();
+  toast('Shield used. Streak safe at '+calcStreak()+' days');
+}
+function undoShield(id){
+  putShields(getShieldsAll().map(function(x){return x.id===id?Object.assign({},x,{undone:true}):x}));
+  closeOverlays();rerender();toast('Shield returned');
 }
 
 // ── Ring: muscle groups trained in the last 7 days ─────
@@ -420,11 +504,12 @@ function renderToday(){
     +'<section class="ring">'+ring.svg
     +'<div class="ring-mid"><b>'+streak+'</b><span>day streak</span><small>'+ring.hit+' of '+ring.n+' groups this week</small></div></section>'
     +'<p class="ring-hint">Tap a segment to see that muscle group\'s week</p>'
+    +'<button class="shield-pill" onclick="openShield()" aria-label="Streak shields">'+ic('shield')+shieldsLeft(td)+' of '+SHIELD_MAX+' shields</button>'
     +'<div class="actions"><button class="btn big" onclick="openLog(today())">'+ic('plus')+'Log workout</button>'
     +'<button class="circle" onclick="timerToggle()" aria-label="Workout timer" id="today-timer">'+ic(getTimer()?'stop':'timer')+'</button>'
     +'<button class="circle" onclick="ckOpen(ckDay())" aria-label="Daily check-in">'+ic('daily')+'</button></div>'
     +'</div>'
-    +'<div class="col">'+restore+coach+ckTodayCard()+'</div>'
+    +'<div class="col">'+restore+shieldCard()+coach+ckTodayCard()+'</div>'
     +'<div class="col">'+calendarCard()+weekGroupsCard(3)+'</div>'
     +'</div>';
 }
@@ -443,7 +528,7 @@ function renderGym(){
   const tiles='<div class="tiles">'
     +tile('yellow','Strength days',st.strengthDays7,STRENGTH_DAYS_TARGET,'last 7 days')
     +tile('blue','Cardio days',st.cardio7,CARDIO_TARGET,'last 7 days')
-    +tile('green','Day streak',calcStreak(),null,'rest days don\'t break it')
+    +tile('green','Day streak',calcStreak(),null,shieldsLeft(td)+' of '+SHIELD_MAX+' shields ready')
     +'</div>';
   document.getElementById('screen-gym').innerHTML=''
     +'<header class="page-head"><div><div class="eyebrow">Training</div><h1>Gym</h1></div>'
@@ -508,6 +593,7 @@ function weekStripCard(){
     const num=parseInt(d.date.slice(8),10);
     let tone='off',icon='bed',label='Rest',cls=d.state;
     if(d.session){const k=sessionKind(d.session);const P=d.session.plan&&PLAN[d.session.plan];tone=P?P.tone:(k==='lower'?'yellow':k==='upper'?'pink':k==='full'?'green':'blue');icon=P?P.icon:(k==='lower'?'legs':k==='upper'?'chest':k==='full'?'gym':k==='cardio'?'cardio':'mobility');label=P?STRIP_LBL[d.session.plan]:KIND_LBL[k]}
+    else if(d.shield){tone='blue';icon='shield';label='Shield';cls+=' shielded'}
     else if(d.rec){tone=d.rec.key==='rest'?'off':d.rec.plan.tone;icon=d.rec.plan.icon;label=STRIP_LBL[d.rec.key]}
     else{label='—'}
     return '<button class="wd '+cls+(d.today?' is-today':'')+'" onclick="openPlanDay(\''+d.date+'\')" aria-label="'+fmtD(d.date)+': '+esc(label)+(d.state==='done'?', done':d.state==='planned'?', planned':'')+'">'
@@ -546,6 +632,11 @@ function openPlanDay(date){
       +(st.editable&&st.list.length?'<p class="hold-hint">Hold an exercise to swap it</p>':'')
       +(!st.confirmed&&P&&st.editable?'<p class="hint">'+ic('info')+'Hold a muscle group to swap in what you actually did.</p>':'')
       +'<div class="row-btns"><button class="btn ghost" onclick="closeOverlays()">Close</button>'+(st.editable?'<button class="btn" onclick="closeOverlays();openLog(\''+date+'\')">Edit</button>':'')+'</div>');
+  } else if(st.mode==='none'&&shieldedMap()[date]){
+    const x=shieldedMap()[date];
+    openSheet(head(fmtDLong(date),'Streak Shield',shieldReason(x.reason),'blue','shield')+'<p class="hint">Your streak carried on through this day. It isn\'t counted as a workout, so the coach still plans around the gap.</p><div class="row-btns"><button class="btn ghost" onclick="closeOverlays()">Close</button><button class="btn" onclick="closeOverlays();openShield()">Shields</button></div>');
+  } else if(st.mode==='none'&&shieldCandidates(td).indexOf(date)>=0&&shieldsLeft(td)){
+    openSheet(head(fmtDLong(date),'Nothing logged','','blue','bed')+'<p class="hint">If something outside your control kept you away, a Streak Shield keeps your streak going.</p><div class="row-btns"><button class="btn ghost" onclick="closeOverlays()">Close</button><button class="btn" onclick="closeOverlays();openShield()">'+ic('shield')+'Use a shield</button></div>');
   } else if(st.mode==='none'){
     openSheet(head(fmtDLong(date),'Nothing logged','','blue','bed')+'<p class="hint">That\'s fine. The plan doesn\'t make you catch up; it continues from your next session.</p><div class="row-btns"><button class="btn" onclick="closeOverlays()">Close</button></div>');
   } else {
@@ -613,6 +704,7 @@ function calendarCard(){
   if(!_calMonth)_calMonth=td.slice(0,7);
   const yr=parseInt(_calMonth.slice(0,4),10),mo=parseInt(_calMonth.slice(5,7),10)-1;
   const byDate={};getSess().forEach(function(s){if((s.groups||[]).length&&!byDate[s.date])byDate[s.date]=s});
+  const shm=shieldedMap();
   const dim=new Date(yr,mo+1,0).getDate(),sd=(new Date(yr,mo,1).getDay()+6)%7;
   let cells='';
   for(let i=0;i<sd;i++)cells+='<span></span>';
@@ -620,6 +712,7 @@ function calendarCard(){
     const iso=yr+'-'+String(mo+1).padStart(2,'0')+'-'+String(d).padStart(2,'0');
     const s=byDate[iso],fut=iso>td;
     const tone=s?(GROUP(s.groups[0])||{tone:'yellow'}).tone:null;
+    if(!s&&shm[iso]){cells+='<button class="cd sh" onclick="openPlanDay(\''+iso+'\')" aria-label="'+fmtD(iso)+', Streak Shield">'+d+'</button>';continue}
     cells+='<button class="cd'+(s?' t-'+tone:'')+(iso===td?' td':'')+(fut?' fut':'')+'"'+((fut||(!s&&isLocked(iso)))?' disabled':' onclick="openLog(\''+iso+'\')"')+' aria-label="'+fmtD(iso)+(s?', '+esc(sessTitle(s)):'')+'">'+d+'</button>';
   }
   const canNext=_calMonth<td.slice(0,7);
@@ -639,8 +732,12 @@ function isoWeekKey(dateStr){
 }
 function renderHistory(){
   const sessions=getSess().slice().sort(function(a,b){return b.date.localeCompare(a.date)});
+  const worked={};sessions.forEach(function(s){if((s.groups||[]).length)worked[s.date]=1});
+  const items=sessions.slice();
+  getShields().forEach(function(x){x.dates.forEach(function(d){if(!worked[d])items.push({shield:x,date:d})})});
+  items.sort(function(a,b){return b.date.localeCompare(a.date)});
   const groups={};
-  sessions.forEach(function(s){
+  items.forEach(function(s){
     const key=_histView==='weekly'?isoWeekKey(s.date):s.date.slice(0,7);
     if(!groups[key]){
       let label;
@@ -654,8 +751,9 @@ function renderHistory(){
   const hist=!sessions.length?'<div class="list"><p class="empty">No workouts yet. Tap + to log your first one.</p></div>'
     :keys.map(function(k){
       const g=groups[k];
-      return '<div class="period"><div class="period-head"><b>'+g.label+'</b><span>'+g.items.length+' session'+(g.items.length!==1?'s':'')+'</span></div>'
-        +'<div class="list">'+g.items.map(sessRow).join('')+'</div></div>';
+      const n=g.items.filter(function(s){return !s.shield}).length;
+      return '<div class="period"><div class="period-head"><b>'+g.label+'</b><span>'+n+' session'+(n!==1?'s':'')+'</span></div>'
+        +'<div class="list">'+g.items.map(function(s){return s.shield?shieldRow(s):sessRow(s)}).join('')+'</div></div>';
     }).join('');
   document.getElementById('screen-history').innerHTML=''
     +'<header class="page-head"><div><div class="eyebrow">'+sessions.length+' sessions logged</div><h1>History</h1></div>'
@@ -664,6 +762,11 @@ function renderHistory(){
     +'<div class="col">'+calendarCard()+'</div>'
     +'<div class="col"><div class="seg" role="tablist"><button role="tab" aria-selected="'+(_histView==='weekly')+'" class="'+(_histView==='weekly'?'on':'')+'" onclick="_histView=\'weekly\';renderHistory()">Weekly</button><button role="tab" aria-selected="'+(_histView==='monthly')+'" class="'+(_histView==='monthly'?'on':'')+'" onclick="_histView=\'monthly\';renderHistory()">Monthly</button></div>'+hist+'</div>'
     +'</div>';
+}
+function shieldRow(it){
+  return '<button class="row sess" onclick="openPlanDay(\''+it.date+'\')"><span class="dot t-blue">'+ic('shield')+'</span>'
+    +'<span class="row-main"><small>'+fmtD(it.date)+'</small><b>Streak Shield</b><small>'+esc(shieldReason(it.shield.reason))+' · streak paused, not broken</small></span>'
+    +'<span class="chev">'+ic('right')+'</span></button>';
 }
 function sessRow(s){
   const G=GROUP((s.groups||[])[0])||{tone:'yellow',icon:'gym'};
@@ -923,6 +1026,7 @@ function renderProfile(){
     +'</div>'
     +'<h2 class="sec">Settings</h2><div class="list">'
     +listRow('pencil','pink','Your name',esc(p.name),'nameSheet()')
+    +listRow('shield','blue','Streak shields',shieldsLeft(today())+' of '+SHIELD_MAX+' ready','openShield()')
     +listRow('bed','blue','Rest days',rd.length?rd.map(function(d){return DOW_F[d].slice(0,3)}).join(', '):'None set','restDaysSheet()')
     +(r?listRow('alarm','yellow','Wake target',ckFmtTime(r.wakeTarget),'ckWakeSheet()'):'')
     +'</div>'
@@ -1028,6 +1132,8 @@ function reportTraining(){
   GROUPS.forEach(function(G){if(G.target)md+='- '+G.label+': '+st.groups[G.k].n7+' of '+G.target+'\n'});
   md+='\n## Sessions\n\n| Date | Session | Trained | Exercises | Minutes | Steps | Notes |\n|---|---|---|---|---|---|---|\n';
   sess.forEach(function(s){md+='| '+fmtD(s.date)+' '+s.date.slice(0,4)+' | '+sessTitle(s)+' | '+(s.groups||[]).map(function(k){return GROUP(k)?GROUP(k).label:k}).join(', ')+' | '+(Array.isArray(s.exercises)?s.exercises.join(', '):'')+' | '+(s.durationMin||'')+' | '+(s.steps||'')+' | '+(s.notes||'').replace(/\|/g,'/').replace(/\n/g,' ')+' |\n'});
+  const shl=getShields();
+  if(shl.length){md+='\n## Streak shields (missed for reasons outside my control)\n\n';shl.forEach(function(x){md+='- '+x.dates.map(fmtD).join(', ')+': '+shieldReason(x.reason)+'\n'})}
   if(mets.length){md+='\n## Body measurements\n\n| Date | Weight (kg) | Waist (cm) |\n|---|---|---|\n';mets.forEach(function(m){md+='| '+m.date+' | '+(m.weight||'')+' | '+(m.waist||'')+' |\n'})}
   md+='\n---\nSuggested prompt: "Here is my SET3 training log. Analyse my progress: what\'s improving, what needs attention, and what I should focus on for the next 4 weeks."\n';
   deliver('set3-training-log-'+today()+'.md',md,'text/markdown');
@@ -1038,7 +1144,7 @@ function reportCheckins(){
   deliver('checkin-log-'+today()+'.html',html,'text/html');
 }
 function downloadBackup(){
-  const data={schema:4,app:'SET3',exportedAt:new Date().toISOString(),sessions:getSess(),mets:getMets(),restDays:getRestDays(),daily:ckAll(),reset:ckReset(),profile:sGet('profile',null)};
+  const data={schema:4,app:'SET3',exportedAt:new Date().toISOString(),sessions:getSess(),mets:getMets(),restDays:getRestDays(),daily:ckAll(),reset:ckReset(),profile:sGet('profile',null),shields:getShieldsAll()};
   deliver('set3-backup-'+today()+'.json',JSON.stringify(data,null,2),'application/json');
 }
 function triggerRestore(){const i=document.getElementById('restore-file');if(i)i.click()}
@@ -1060,6 +1166,7 @@ function handleRestore(input){
     let ckAdded=0;(data.daily||[]).forEach(function(e){if(e&&e.date&&!byDay[e.date]){byDay[e.date]=e;ckAdded++}});
     ckSaveAll(Object.values(byDay));
     if(data.restDays&&data.restDays.length&&!getRestDays().length)putRestDays(data.restDays);
+    if(Array.isArray(data.shields)){const ids={};getShieldsAll().forEach(function(x){ids[x.id]=1});const add=data.shields.filter(function(x){return x&&x.id&&!ids[x.id]});if(add.length)putShields(getShieldsAll().concat(add))}
     if(data.reset&&!ckReset())ckSaveReset(data.reset);
     if(data.profile&&!sGet('profile',null))putProfile(data.profile);
     toast('Restored '+added+' workouts'+(ckAdded?' and '+ckAdded+' check-ins':''));

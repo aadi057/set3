@@ -5,7 +5,7 @@
 // artifact, to the private per-user db so it survives browsers and
 // devices. On the standalone PWA only localStorage is used.
 // ══════════════════════════════════════════════════════
-const KEYS=['sessions','mets','restDays','daily','reset','timer','profile','picks'];
+const KEYS=['sessions','mets','restDays','daily','reset','timer','profile','picks','shields'];
 const LS='set3:';
 const S={cache:{},at:{},db:null,uid:null,mode:'local',writing:{},dirty:{},err:null};
 
@@ -56,7 +56,7 @@ async function initCloud(){
   let changed=false;
   // Lists merge item by item so a fresh device (or a seeded session) never
   // wipes history kept in the account. Everything else: newest copy wins.
-  const MERGE={sessions:'id',daily:'date',mets:'date'};
+  const MERGE={sessions:'id',daily:'date',mets:'date',shields:'id'};
   KEYS.forEach(function(k){
     const r=remote[k],localAt=S.at[k]||0;
     if(MERGE[k]&&r&&Array.isArray(r.v)&&Array.isArray(S.cache[k])){
@@ -98,6 +98,11 @@ const putSess=function(a){sSet('sessions',a)};
 const getMets=function(){return sGet('mets',[])};
 const putMets=function(a){sSet('mets',a)};
 const getRestDays=function(){return sGet('restDays',[])};
+// Streak shields: {id, dates:[iso…], reason, at}. Undone ones are kept with
+// undone:true so a sync never brings them back.
+const getShieldsAll=function(){return sGet('shields',[])||[]};
+const getShields=function(){return getShieldsAll().filter(function(x){return x&&!x.undone&&Array.isArray(x.dates)})};
+const putShields=function(a){sSet('shields',a)};
 const putRestDays=function(a){sSet('restDays',a)};
 const getProfile=function(){return Object.assign({name:'Aadi'},sGet('profile',{}))};
 const putProfile=function(p){sSet('profile',p)};
@@ -196,6 +201,15 @@ function migrateSessions(){
       notes:'Logged afterwards: the coach\'s Upper B for the day.'});
     changed=true;
   }
+  // 12–13 Nov: missed for family reasons; Aadi asked for one shield to cover both.
+  (function(){
+    const sh=getShieldsAll();
+    if(sh.some(function(x){return x&&x.id==='sh-2026-11-12'}))return;
+    if(all.some(function(s){return (s.date==='2026-11-12'||s.date==='2026-11-13')&&(s.groups||[]).length}))return;
+    S.cache.shields=sh.concat([{id:'sh-2026-11-12',dates:['2026-11-12','2026-11-13'],reason:'family',at:'2026-11-14'}]);
+    S.at.shields=Date.now();lsWrite('shields',S.cache.shields);lsWrite('__at',S.at);
+    if(S.db)cloudWrite('shields');
+  })();
   if(changed){S.cache.sessions=all;S.at.sessions=Date.now();lsWrite('sessions',all);lsWrite('__at',S.at);cloudWrite('sessions')}
 }
 
